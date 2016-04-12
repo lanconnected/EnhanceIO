@@ -90,7 +90,11 @@ static struct notifier_block eio_ssd_rm_notifier = {
 };
 
 #if (LINUX_VERSION_CODE >= KERNEL_VERSION(3,17,0))
+#if (LINUX_VERSION_CODE >= KERNEL_VERSION(4,4,0))
+int eio_wait_schedule(struct wait_bit_key *unused, int unused2)
+#else
 int eio_wait_schedule(struct wait_bit_key *unused)
+#endif
 #else
 #define wait_on_bit_lock_action wait_on_bit_lock
 int eio_wait_schedule(void *unused)

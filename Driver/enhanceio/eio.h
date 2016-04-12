@@ -130,9 +130,13 @@ struct eio_control_s {
 };
 
 #if (LINUX_VERSION_CODE >= KERNEL_VERSION(3,17,0))
-int eio_wait_schedule(struct wait_bit_key *unused);
+#if (LINUX_VERSION_CODE >= KERNEL_VERSION(4,4,0))
+int eio_wait_schedule(struct wait_bit_key *, int);
 #else
-int eio_wait_schedule(void *unused);
+int eio_wait_schedule(struct wait_bit_key *);
+#endif
+#else
+int eio_wait_schedule(void *);
 #endif
 
 struct eio_event {

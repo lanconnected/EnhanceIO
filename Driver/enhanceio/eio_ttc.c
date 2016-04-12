@@ -47,7 +47,11 @@ static struct list_head eio_ttc_list[EIO_HASHTBL_SIZE];
 int eio_reboot_notified;
 
 #if (LINUX_VERSION_CODE >= KERNEL_VERSION(3,2,0))
+#if (LINUX_VERSION_CODE >= KERNEL_VERSION(4,4,0))
+static blk_qc_t eio_make_request_fn(struct request_queue *, struct bio *);
+#else
 static void eio_make_request_fn(struct request_queue *, struct bio *);
+#endif
 #else
 static int eio_make_request_fn(struct request_queue *, struct bio *);
 #endif
@@ -412,7 +416,11 @@ void eio_ttc_init(void)
  */
 
 #if (LINUX_VERSION_CODE >= KERNEL_VERSION(3,2,0))
+#if (LINUX_VERSION_CODE >= KERNEL_VERSION(4,4,0))
+static blk_qc_t eio_make_request_fn(struct request_queue *q, struct bio *bio)
+#else
 static void eio_make_request_fn(struct request_queue *q, struct bio *bio)
+#endif
 #else
 static int eio_make_request_fn(struct request_queue *q, struct bio *bio)
 #endif
@@ -541,7 +549,11 @@ re_lookup:
 
 	if (overlap || dmc)
 #if (LINUX_VERSION_CODE >= KERNEL_VERSION(3,2,0))
+#if (LINUX_VERSION_CODE >= KERNEL_VERSION(4,4,0))
+		return BLK_QC_T_NONE;
+#else
 		return;
+#endif
 #else
 		return 0;
 #endif
@@ -565,7 +577,11 @@ re_lookup:
 
 	hdd_make_request(origmfn, bio);
 #if (LINUX_VERSION_CODE >= KERNEL_VERSION(3,2,0))
+#if (LINUX_VERSION_CODE >= KERNEL_VERSION(4,4,0))
+	return BLK_QC_T_NONE;
+#else
 	return;
+#endif
 #else
 	return 0;
 #endif
