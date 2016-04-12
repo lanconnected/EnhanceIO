@@ -95,9 +95,9 @@ static void bc_put(struct bio_container *bc, unsigned int doneio)
 			eio_release_io_resources(bc->bc_dmc, bc);
 #if (LINUX_VERSION_CODE >= KERNEL_VERSION(3,14,0))
 		bc->bc_bio->bi_iter.bi_size = 0;
-#else 
+#else
 		bc->bc_bio->bi_size = 0;
-#endif 
+#endif
 		dmc = bc->bc_dmc;
 
 		/* update iotime for latency */
@@ -2012,9 +2012,9 @@ static struct eio_bio *eio_new_ebio(struct cache_c *dmc, struct bio *bio,
 	if (residual_biovec) {
 #if (LINUX_VERSION_CODE >= KERNEL_VERSION(3,14,0))
 		int bvecindex = bio->bi_iter.bi_idx;
-#else 
+#else
 		int bvecindex = bio->bi_idx;
-#endif 
+#endif
 		int rbvindex;
 
 		/* Calculate the number of bvecs required */
@@ -2054,7 +2054,7 @@ static struct eio_bio *eio_new_ebio(struct cache_c *dmc, struct bio *bio,
 			ebio->eb_rbv[rbvindex].bv_len =
 				bio->bi_io_vec[bio->bi_iter.bi_idx].bv_len -
 				residual_biovec;
-#else 
+#else
 			ebio->eb_rbv[rbvindex].bv_page =
 				bio->bi_io_vec[bio->bi_idx].bv_page;
 			ebio->eb_rbv[rbvindex].bv_offset =
@@ -2063,7 +2063,7 @@ static struct eio_bio *eio_new_ebio(struct cache_c *dmc, struct bio *bio,
 			ebio->eb_rbv[rbvindex].bv_len =
 				bio->bi_io_vec[bio->bi_idx].bv_len -
 				residual_biovec;
-#endif 
+#endif
 			if (ebio->eb_rbv[rbvindex].bv_len > (unsigned)ios) {
 				residual_biovec += ios;
 				ebio->eb_rbv[rbvindex].bv_len = ios;
@@ -2071,9 +2071,9 @@ static struct eio_bio *eio_new_ebio(struct cache_c *dmc, struct bio *bio,
 				residual_biovec = 0;
 #if (LINUX_VERSION_CODE >= KERNEL_VERSION(3,14,0))
 				bio->bi_iter.bi_idx++;
-#else 
+#else
 				bio->bi_idx++;
-#endif 
+#endif
 			}
 			ios -= ebio->eb_rbv[rbvindex].bv_len;
 			rbvindex++;
@@ -2087,27 +2087,27 @@ static struct eio_bio *eio_new_ebio(struct cache_c *dmc, struct bio *bio,
 			return ERR_PTR(-ENOMEM);
 #if (LINUX_VERSION_CODE >= KERNEL_VERSION(3,14,0))
 		ebio->eb_bv = bio->bi_io_vec + bio->bi_iter.bi_idx;
-#else 
+#else
 		ebio->eb_bv = bio->bi_io_vec + bio->bi_idx;
-#endif 
+#endif
 		ios = iosize;
 		while (ios > 0) {
 			numbvecs++;
 #if (LINUX_VERSION_CODE >= KERNEL_VERSION(3,14,0))
 			if ((unsigned)ios < bio->bi_io_vec[bio->bi_iter.bi_idx].bv_len) {
-#else 
+#else
 			if ((unsigned)ios < bio->bi_io_vec[bio->bi_idx].bv_len) {
-#endif 
+#endif
 				residual_biovec = ios;
 				ios = 0;
 			} else {
 #if (LINUX_VERSION_CODE >= KERNEL_VERSION(3,14,0))
 				ios -= bio->bi_io_vec[bio->bi_iter.bi_idx].bv_len;
 				bio->bi_iter.bi_idx++;
-#else 
+#else
 				ios -= bio->bi_io_vec[bio->bi_idx].bv_len;
 				bio->bi_idx++;
-#endif 
+#endif
 			}
 		}
 	}
@@ -2149,13 +2149,13 @@ eio_disk_io(struct cache_c *dmc, struct bio *bio,
 	ebio =
 		eio_new_ebio(dmc, bio, &residual_biovec, bio->bi_iter.bi_sector,
 				 bio->bi_iter.bi_size, bc, EB_MAIN_IO);
-#else 
+#else
 	/*disk io happens on whole bio. Reset bi_idx*/
 	bio->bi_idx = 0;
 	ebio =
 		eio_new_ebio(dmc, bio, &residual_biovec, bio->bi_sector,
 			     bio->bi_size, bc, EB_MAIN_IO);
-#endif 
+#endif
 
 	if (unlikely(IS_ERR(ebio))) {
 		bc->bc_error = error = PTR_ERR(ebio);
@@ -2177,17 +2177,17 @@ eio_disk_io(struct cache_c *dmc, struct bio *bio,
 		job->action = READDISK;
 #if (LINUX_VERSION_CODE >= KERNEL_VERSION(3,14,0))
 		SECTOR_STATS(dmc->eio_stats.disk_reads, bio->bi_iter.bi_size);
-#else 
+#else
 		SECTOR_STATS(dmc->eio_stats.disk_reads, bio->bi_size);
-#endif 
+#endif
 		atomic64_inc(&dmc->eio_stats.readdisk);
 	} else {
 		job->action = WRITEDISK;
 #if (LINUX_VERSION_CODE >= KERNEL_VERSION(3,14,0))
 		SECTOR_STATS(dmc->eio_stats.disk_writes, bio->bi_iter.bi_size);
-#else 
+#else
 		SECTOR_STATS(dmc->eio_stats.disk_writes, bio->bi_size);
-#endif 
+#endif
 		atomic64_inc(&dmc->eio_stats.writedisk);
 	}
 
@@ -2211,9 +2211,9 @@ eio_disk_io(struct cache_c *dmc, struct bio *bio,
 errout:
 #if (LINUX_VERSION_CODE >= KERNEL_VERSION(3,14,0))
 	eio_inval_range(dmc, bio->bi_iter.bi_sector, bio->bi_iter.bi_size);
-#else 
+#else
 	eio_inval_range(dmc, bio->bi_sector, bio->bi_size);
-#endif 
+#endif
 	eio_flag_abios(dmc, anchored_bios, error);
 
 	if (ebio)
@@ -2320,11 +2320,11 @@ static int eio_acquire_set_locks(struct cache_c *dmc, struct bio_container *bc)
 	round_sector = EIO_ROUND_SET_SECTOR(dmc, bio->bi_iter.bi_sector);
 	set_size = dmc->block_size * dmc->assoc;
 	end_sector = bio->bi_iter.bi_sector + eio_to_sector(bio->bi_iter.bi_size);
-#else 
+#else
 	round_sector = EIO_ROUND_SET_SECTOR(dmc, bio->bi_sector);
 	set_size = dmc->block_size * dmc->assoc;
 	end_sector = bio->bi_sector + eio_to_sector(bio->bi_size);
-#endif 
+#endif
 	first_set = -1;
 	last_set = -1;
 	cur_set = -1;
@@ -2537,9 +2537,9 @@ int eio_map(struct cache_c *dmc, struct request_queue *rq, struct bio *bio)
 {
 #if (LINUX_VERSION_CODE >= KERNEL_VERSION(3,14,0))
 	sector_t sectors = eio_to_sector(bio->bi_iter.bi_size);
-#else 
+#else
 	sector_t sectors = eio_to_sector(bio->bi_size);
-#endif 
+#endif
 	struct eio_bio *ebio = NULL;
 	struct bio_container *bc;
 	sector_t snum;
@@ -2557,9 +2557,9 @@ int eio_map(struct cache_c *dmc, struct request_queue *rq, struct bio *bio)
 
 #if (LINUX_VERSION_CODE >= KERNEL_VERSION(3,14,0))
 	EIO_ASSERT(bio->bi_iter.bi_idx == 0);
-#else 
+#else
 	EIO_ASSERT(bio->bi_idx == 0);
-#endif 
+#endif
 
 	pr_debug("this needs to be removed immediately\n");
 
@@ -2573,12 +2573,12 @@ int eio_map(struct cache_c *dmc, struct request_queue *rq, struct bio *bio)
 			("eio_map: Discard IO received. Invalidate incore start=%lu totalsectors=%d.\n",
 			(unsigned long)bio->bi_iter.bi_sector,
 			(int)eio_to_sector(bio->bi_iter.bi_size));
-#else 
+#else
 		pr_debug
 			("eio_map: Discard IO received. Invalidate incore start=%lu totalsectors=%d.\n",
 			(unsigned long)bio->bi_sector,
 			(int)eio_to_sector(bio->bi_size));
-#endif 
+#endif
 		eio_bio_endio(bio, 0);
 		pr_err
 			("eio_map: I/O with Discard flag received. Discard flag is not supported.\n");
@@ -2600,16 +2600,16 @@ int eio_map(struct cache_c *dmc, struct request_queue *rq, struct bio *bio)
 	if (data_dir == READ) {
 #if (LINUX_VERSION_CODE >= KERNEL_VERSION(3,14,0))
 		SECTOR_STATS(dmc->eio_stats.reads, bio->bi_iter.bi_size);
-#else 
+#else
 		SECTOR_STATS(dmc->eio_stats.reads, bio->bi_size);
-#endif 
+#endif
 		atomic64_inc(&dmc->eio_stats.readcount);
 	} else {
 #if (LINUX_VERSION_CODE >= KERNEL_VERSION(3,14,0))
 		SECTOR_STATS(dmc->eio_stats.writes, bio->bi_iter.bi_size);
-#else 
+#else
 		SECTOR_STATS(dmc->eio_stats.writes, bio->bi_size);
-#endif 
+#endif
 		atomic64_inc(&dmc->eio_stats.writecount);
 	}
 
@@ -2649,9 +2649,9 @@ int eio_map(struct cache_c *dmc, struct request_queue *rq, struct bio *bio)
 	 */
 #if (LINUX_VERSION_CODE >= KERNEL_VERSION(3,14,0))
 	if (bio->bi_iter.bi_size == 0) {
-#else 
+#else
 	if (bio->bi_size == 0) {
-#endif 
+#endif
 		eio_process_zero_size_bio(dmc, bio);
 		return DM_MAPIO_SUBMITTED;
 	}
@@ -2674,11 +2674,11 @@ int eio_map(struct cache_c *dmc, struct request_queue *rq, struct bio *bio)
 	snum = bio->bi_iter.bi_sector;
 	totalio = bio->bi_iter.bi_size;
 	biosize = bio->bi_iter.bi_size;
-#else 
+#else
 	snum = bio->bi_sector;
 	totalio = bio->bi_size;
 	biosize = bio->bi_size;
-#endif 
+#endif
 	residual_biovec = 0;
 
 	if (dmc->mode == CACHE_MODE_WB) {
@@ -2861,7 +2861,7 @@ static int eio_read_peek(struct cache_c *dmc, struct eio_bio *ebio)
 		goto out;
 	}
 	EIO_ASSERT(res == INVALID);
-	
+
 	/* cache is marked readonly or set to wronly mode. */
 	/* Do not allow READFILL on SSD */
 	if (dmc->cache_rdonly || dmc->sysctl_active.cache_wronly)

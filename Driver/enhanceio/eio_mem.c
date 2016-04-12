@@ -26,18 +26,18 @@
 #define SECTORS_PER_SET_SHIFT   (dmc->consecutive_shift + dmc->block_shift)
 #define SECTORS_PER_SET_MASK    (SECTORS_PER_SET - 1)
 
-#define EIO_DBN_TO_SET(dmc, dbn, set_number, wrapped)   do {		\
-		u_int64_t value;						\
-		u_int64_t mid_i;						\
-		value = (dbn) >> SECTORS_PER_SET_SHIFT;				\
-		mid_i = (value) & (dmc)->num_sets_mask;				\
-		if (mid_i >= (dmc)->num_sets) {					\
-			(wrapped) = 1;						\
-			(set_number) = mid_i - (dmc)->num_sets;			\
-		} else {							\
-			(wrapped) = 0;						\
-			(set_number) = mid_i;					\
-		}								\
+#define EIO_DBN_TO_SET(dmc, dbn, set_number, wrapped)   do {	\
+		u_int64_t value;				\
+		u_int64_t mid_i;				\
+		value = (dbn) >> SECTORS_PER_SET_SHIFT;		\
+		mid_i = (value) & (dmc)->num_sets_mask;		\
+		if (mid_i >= (dmc)->num_sets) {			\
+			(wrapped) = 1;				\
+			(set_number) = mid_i - (dmc)->num_sets;	\
+		} else {					\
+			(wrapped) = 0;				\
+			(set_number) = mid_i;			\
+		}						\
 } while (0)
 
 /*

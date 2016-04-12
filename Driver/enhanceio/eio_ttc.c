@@ -1352,7 +1352,7 @@ static int eio_policy_switch(struct cache_c *dmc, u_int32_t policy)
 
 	EIO_ASSERT(dmc->req_policy != policy);
 	old_policy_ops = dmc->policy_ops;
-	
+
 	error = eio_policy_init(dmc);
 	if (error)
 		goto out;
