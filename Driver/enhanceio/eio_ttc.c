@@ -32,7 +32,7 @@
 #include "eio.h"
 #include "eio_ttc.h"
 
-#if (LINUX_VERSION_CODE < KERNEL_VERSION(3,17,0))
+#if (LINUX_VERSION_CODE < KERNEL_VERSION(3,17,0) && RHEL_RELEASE_CODE < RHEL_RELEASE_VERSION(7,3))
 #define wait_on_bit_lock_action wait_on_bit_lock
 #endif
 

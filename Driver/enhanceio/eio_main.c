@@ -2386,7 +2386,7 @@ static int eio_acquire_set_locks(struct cache_c *dmc, struct bio_container *bc)
 				spin_lock_irqsave(&set->cs_lock, flags);
 			}
 			if (atomic_inc_return(&set->pending) == 1)
-#if (LINUX_VERSION_CODE >= KERNEL_VERSION(3,17,0))
+#if (LINUX_VERSION_CODE >= KERNEL_VERSION(3,17,0) || RHEL_RELEASE_CODE >= RHEL_RELEASE_VERSION(7,3))
 				reinit_completion(&(set->io_done));
 #else
 				INIT_COMPLETION(set->io_done);
@@ -3358,7 +3358,7 @@ eio_clean_set(struct cache_c *dmc, index_t set, int whole, int force)
 	/* 1. exclusive lock. Let the ongoing writes to finish. Pause new writes */
 	spin_lock_irqsave(&dmc->cache_sets[set].cs_lock, flags);
 	dmc->cache_sets[set].flags |= SETFLAG_CLEAN_ACTIVE;
-#if (LINUX_VERSION_CODE >= KERNEL_VERSION(3,17,0))
+#if (LINUX_VERSION_CODE >= KERNEL_VERSION(3,17,0) || RHEL_RELEASE_CODE >= RHEL_RELEASE_VERSION(7,3))
 	reinit_completion(&dmc->cache_sets[set].clean_done);
 #else
 	INIT_COMPLETION(dmc->cache_sets[set].clean_done);
@@ -3473,7 +3473,7 @@ eio_clean_set(struct cache_c *dmc, index_t set, int whole, int force)
 	 * I/Os.
 	 */
 	atomic_set(&sioc.pending, 1);
-#if (LINUX_VERSION_CODE >= KERNEL_VERSION(3,17,0))
+#if (LINUX_VERSION_CODE >= KERNEL_VERSION(3,17,0) || RHEL_RELEASE_CODE >= RHEL_RELEASE_VERSION(7,3))
 	reinit_completion(&sioc.done);
 #else
 	INIT_COMPLETION(sioc.done);

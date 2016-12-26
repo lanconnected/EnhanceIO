@@ -61,6 +61,13 @@
 #include <linux/vmalloc.h>      /* for sysinfo (mem) variables */
 #include <linux/mm.h>
 #include <scsi/scsi_device.h>   /* required for SSD failure handling */
+
+/* we use RHEL_RELEASE_VERSION to compile with RHEL/CentOS 7.3's kernel  */
+#ifndef RHEL_RELEASE_CODE
+#define RHEL_RELEASE_CODE 0
+#define RHEL_RELEASE_VERSION(a,b) (((a) << 8) + (b))
+#endif
+
 /* resolve conflict with scsi/scsi_device.h */
 #ifdef QUEUED
 #undef QUEUED
@@ -129,8 +136,8 @@ struct eio_control_s {
 	unsigned long synch_flags;
 };
 
-#if (LINUX_VERSION_CODE >= KERNEL_VERSION(3,17,0))
-#if (LINUX_VERSION_CODE >= KERNEL_VERSION(4,4,0))
+#if (LINUX_VERSION_CODE >= KERNEL_VERSION(3,17,0) || RHEL_RELEASE_CODE >= RHEL_RELEASE_VERSION(7,3))
+#if (LINUX_VERSION_CODE >= KERNEL_VERSION(4,4,0) || RHEL_RELEASE_CODE >= RHEL_RELEASE_VERSION(7,3))
 int eio_wait_schedule(struct wait_bit_key *, int);
 #else
 int eio_wait_schedule(struct wait_bit_key *);
