@@ -39,7 +39,7 @@ enhanceio_fifo-y	+= eio_fifo.o
 enhanceio_rand-y	+= eio_rand.o
 enhanceio_lru-y	+= eio_lru.o
 .PHONY: all
-all: modules 
+all: modules
 .PHONY:    modules
 modules: $(RHEL5_SETUP)
 	make -C $(KERNEL_TREE) M=$(PWD) modules V=0

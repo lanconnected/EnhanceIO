@@ -90,7 +90,11 @@ static struct notifier_block eio_ssd_rm_notifier = {
 };
 
 #if (LINUX_VERSION_CODE >= KERNEL_VERSION(3,17,0))
+#if (LINUX_VERSION_CODE >= KERNEL_VERSION(4,4,0))
+int eio_wait_schedule(struct wait_bit_key *unused, int unused2)
+#else
 int eio_wait_schedule(struct wait_bit_key *unused)
+#endif
 #else
 #define wait_on_bit_lock_action wait_on_bit_lock
 int eio_wait_schedule(void *unused)
@@ -805,7 +809,7 @@ static int eio_md_create(struct cache_c *dmc, int force, int cold)
 
 		for (i = 0; i < dmc->size; i++) {
 			next_ptr->dbn = cpu_to_le64(EIO_DBN_GET(dmc, i));
-			next_ptr->cache_state = 
+			next_ptr->cache_state =
 				cpu_to_le64(EIO_CACHE_STATE_GET(dmc,
 				(index_t)i) & (INVALID | VALID | DIRTY));
 			next_ptr++;
@@ -1130,7 +1134,7 @@ static int eio_md_load(struct cache_c *dmc)
 
 	if (!dmc->cache_flags)
 		dmc->cache_flags = le32_to_cpu(header->sbf.cache_flags);
-	
+
 	error = eio_policy_init(dmc);
 	if (error)
 		goto free_header;
@@ -1678,7 +1682,7 @@ int eio_cache_create(struct cache_rec_short *cache)
 			strerr = "Failed to initialize policy";
 			goto bad5;
 		}
-	}	
+	}
 
 	if (cache->cr_flags) {
 		int flags;
@@ -2181,7 +2185,7 @@ int eio_ctr_ssd_add(struct cache_c *dmc, char *dev)
 	dmc->persistence = CACHE_FORCECREATE;
 
 	eio_policy_free(dmc);
-	r = eio_policy_init(dmc); 
+	r = eio_policy_init(dmc);
 	if (r) {
 		pr_err("ctr_ssd_add: Failed to initialize policy");
 		goto out;
