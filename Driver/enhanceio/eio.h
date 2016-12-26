@@ -61,6 +61,13 @@
 #include <linux/vmalloc.h>      /* for sysinfo (mem) variables */
 #include <linux/mm.h>
 #include <scsi/scsi_device.h>   /* required for SSD failure handling */
+
+/* we use RHEL_RELEASE_VERSION to compile with RHEL/CentOS 7.3's kernel  */
+#ifndef RHEL_RELEASE_CODE
+#define RHEL_RELEASE_CODE 0
+#define RHEL_RELEASE_VERSION(a,b) (((a) << 8) + (b))
+#endif
+
 /* resolve conflict with scsi/scsi_device.h */
 #ifdef QUEUED
 #undef QUEUED
@@ -129,10 +136,14 @@ struct eio_control_s {
 	unsigned long synch_flags;
 };
 
-#if (LINUX_VERSION_CODE >= KERNEL_VERSION(3,17,0))
-int eio_wait_schedule(struct wait_bit_key *unused);
+#if (LINUX_VERSION_CODE >= KERNEL_VERSION(3,17,0) || RHEL_RELEASE_CODE >= RHEL_RELEASE_VERSION(7,3))
+#if (LINUX_VERSION_CODE >= KERNEL_VERSION(4,4,0) || RHEL_RELEASE_CODE >= RHEL_RELEASE_VERSION(7,3))
+int eio_wait_schedule(struct wait_bit_key *, int);
 #else
-int eio_wait_schedule(void *unused);
+int eio_wait_schedule(struct wait_bit_key *);
+#endif
+#else
+int eio_wait_schedule(void *);
 #endif
 
 struct eio_event {
@@ -336,16 +347,16 @@ struct flash_cacheblock {
  * block size.
  */
 #define IO_BVEC_COUNT(x, blksize) ({		\
-					   int count = IO_PAGE_COUNT(x);	   \
-					   switch ((blksize)) {			    \
-					   case BLKSIZE_2K:			   \
-						   count = count * 2;		   \
-						   break;			   \
-					   case BLKSIZE_4K:			   \
-					   case BLKSIZE_8K:			   \
-						   break;			   \
-					   }					   \
-					   count;				   \
+					   int count = IO_PAGE_COUNT(x);	\
+					   switch ((blksize)) {			\
+					   case BLKSIZE_2K:			\
+						   count = count * 2;		\
+						   break;			\
+					   case BLKSIZE_4K:			\
+					   case BLKSIZE_8K:			\
+						   break;			\
+					   }					\
+					   count;				\
 				   })
 
 #define MD_MAX_NR_PAGES                         16
@@ -1132,28 +1143,28 @@ extern sector_t eio_get_device_start_sect(struct eio_bdev *);
 #define EIO_INIT_EVENT(ev)	((ev)->process = NULL)
 
 /*Assumes that the macro gets called under the same spinlock as in wait event*/
-#define EIO_SET_EVENT_AND_UNLOCK(ev, sl, flags)					\
-	do {							\
-		struct task_struct      *p = NULL;		\
-		if ((ev)->process) {				\
-			(p) = (ev)->process;			\
-			(ev)->process = NULL;			\
-		}						\
-		spin_unlock_irqrestore((sl), flags);		\
-		if (p) {					\
-			(void)wake_up_process(p);		\
-		}						\
+#define EIO_SET_EVENT_AND_UNLOCK(ev, sl, flags)		\
+	do {						\
+		struct task_struct      *p = NULL;	\
+		if ((ev)->process) {			\
+			(p) = (ev)->process;		\
+			(ev)->process = NULL;		\
+		}					\
+		spin_unlock_irqrestore((sl), flags);	\
+		if (p) {				\
+			(void)wake_up_process(p);	\
+		}					\
 	} while (0)
 
 /*Assumes that the spin lock sl is taken while calling this macro*/
-#define EIO_WAIT_EVENT(ev, sl, flags)						\
-	do {							\
-		(ev)->process = current;			\
-		set_current_state(TASK_INTERRUPTIBLE);		\
-		spin_unlock_irqrestore((sl), flags);		\
-		(void)schedule_timeout(10 * HZ);		\
-		spin_lock_irqsave((sl), flags);			\
-		(ev)->process = NULL;				\
+#define EIO_WAIT_EVENT(ev, sl, flags)			\
+	do {						\
+		(ev)->process = current;		\
+		set_current_state(TASK_INTERRUPTIBLE);	\
+		spin_unlock_irqrestore((sl), flags);	\
+		(void)schedule_timeout(10 * HZ);	\
+		spin_lock_irqsave((sl), flags);		\
+		(ev)->process = NULL;			\
 	} while (0)
 
 #define EIO_CLEAR_EVENT(ev)	((ev)->process = NULL)
