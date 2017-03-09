@@ -170,7 +170,18 @@ static inline int op_from_rq_bits(u64 flags)
 }
 
 #define submit_bio(__bio) submit_bio((__bio)->bi_rw, __bio)
+#else /* COMPAT_HAVE_BIO_OPF */
+/* They shuffled a way to work with bio in 4.10 AGAIN.
+ * We don't have bio_flags macro.
+ * We don't have WRITE_FLUSH.
+ * We shouldn't use bio_set_op_attrs anymore (but we are allowed to)*/
+#ifndef bio_flags
+#define bio_flags(bio) ((bio)->bi_opf & ~REQ_OP_MASK)
 #endif
+#ifndef WRITE_FLUSH
+#define WRITE_FLUSH REQ_PREFLUSH
+#endif
+#endif /* COMPAT_HAVE_BIO_OPF */
 
 #ifdef COMPAT_WAIT_FUNCTION_HAS_2_PARAM
 #elif defined COMPAT_WAIT_FUNCTION_HAS_PARAM

@@ -243,7 +243,7 @@ int eio_ttc_activate(struct cache_c *dmc)
 
 	msleep(1);
 	eio_issue_empty_barrier_flush(dmc->disk_dev->bdev, NULL,
-				      EIO_HDD_DEVICE, dmc->origmfn, REQ_OP_WRITE, WRITE_FLUSH);
+				      EIO_HDD_DEVICE, dmc->origmfn, REQ_OP_FLUSH, WRITE_FLUSH);
 	up_write(&eio_ttc_lock[index]);
 
 out:
