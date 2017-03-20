@@ -696,6 +696,10 @@ int eio_clean_thread_proc(void *context)
 			/* resume the periodic clean */
 			spin_lock_irqsave(&dmc->dirty_set_lru_lock, flags);
 			dmc->is_clean_aged_sets_sched = 0;
+			/* if there is no dirty blocks (nr_dirty == 0), periodic
+			   clean will not be scheduled here. It will get scheduled
+			   in eio_touch_set_lru once first dirty block is added.
+			 */
 			if (dmc->sysctl_active.time_based_clean_interval
 			    && atomic64_read(&dmc->nr_dirty)) {
 				/* there is a potential race here, If a sysctl changes
@@ -3495,11 +3499,13 @@ void eio_clean_aged_sets(struct work_struct *work)
 		if (set_index == LRU_NULL)
 			break;
 
+		/* if the most aged set is younger than clean_interval, break */
 		if ((EIO_DIV((cur_time - set_time), HZ)) <
 		    (dmc->sysctl_active.time_based_clean_interval * 60))
 			break;
 		lru_rem(dmc->dirty_set_lru, set_index);
 
+		/* add only sets older than clean interval */
 		if (dmc->cache_sets[set_index].nr_dirty > 0) {
 			spin_unlock_irqrestore(&dmc->dirty_set_lru_lock, flags);
 			eio_addto_cleanq(dmc, set_index, 1);
