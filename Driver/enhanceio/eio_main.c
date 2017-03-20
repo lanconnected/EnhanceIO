@@ -696,10 +696,6 @@ int eio_clean_thread_proc(void *context)
 			/* resume the periodic clean */
 			spin_lock_irqsave(&dmc->dirty_set_lru_lock, flags);
 			dmc->is_clean_aged_sets_sched = 0;
-			/* if there is no dirty blocks (nr_dirty == 0), periodic
-			   clean will not be scheduled here. It will get scheduled
-			   in eio_touch_set_lru once first dirty block is added.
-			 */
 			if (dmc->sysctl_active.time_based_clean_interval
 			    && atomic64_read(&dmc->nr_dirty)) {
 				/* there is a potential race here, If a sysctl changes
@@ -1333,7 +1329,7 @@ static void eio_do_mdupdate(struct work_struct *work)
 		 * Set SYNC for making metadata
 		 * writes as high priority.
 		 */
-		error = eio_io_async_bvec(dmc, &region, REQ_OP_WRITE, REQ_SYNC,
+		error = eio_io_async_bvec(dmc, &region, REQ_OP_WRITE, EIO_REQ_SYNC,
 					  &mdreq->mdblk_bvecs[i], 1,
 					  eio_mdupdate_callback, work, 0);
 		if (error && !(mdreq->error))
@@ -3339,7 +3335,7 @@ eio_clean_set(struct cache_c *dmc, index_t set, int whole, int force)
 			SECTOR_STATS(dmc->eio_stats.disk_writes,
 				     to_bytes(where.count));
 			atomic_inc(&sioc.pending);
-			error = eio_io_async_bvec(dmc, &where, REQ_OP_WRITE, REQ_SYNC,
+			error = eio_io_async_bvec(dmc, &where, REQ_OP_WRITE, EIO_REQ_SYNC,
 						  bvecs, nr_bvecs,
 						  eio_sync_io_callback, &sioc,
 						  1);
@@ -3505,7 +3501,6 @@ void eio_clean_aged_sets(struct work_struct *work)
 			break;
 		lru_rem(dmc->dirty_set_lru, set_index);
 
-		/* add only sets older than clean interval */
 		if (dmc->cache_sets[set_index].nr_dirty > 0) {
 			spin_unlock_irqrestore(&dmc->dirty_set_lru_lock, flags);
 			eio_addto_cleanq(dmc, set_index, 1);
