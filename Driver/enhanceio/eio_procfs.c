@@ -88,9 +88,8 @@ eio_zerostats_sysctl(struct ctl_table *table, int write, void __user *buffer,
 			return -EINVAL;
 		}
 
-		if (dmc->sysctl_pending.zerostats ==
-		    dmc->sysctl_active.zerostats)
-			/* same value. Nothing to work */
+		if (!dmc->sysctl_pending.zerostats)
+			/* if 0 do nothing */
 			return 0;
 
 		/* Copy to active */
@@ -1128,7 +1127,7 @@ static struct sysctl_table_common {
 #endif
 			.procname	= "zero_stats",
 			.maxlen		= sizeof(int),
-			.mode		= 0644,
+			.mode		= 0200,
 			.proc_handler	= &eio_zerostats_sysctl,
 		}, {            /* 2 */
 #if LINUX_VERSION_CODE < KERNEL_VERSION(2,6,33)
