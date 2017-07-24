@@ -693,7 +693,7 @@ def main():
 		return SUCCESS
 
 	elif sys.argv[1] == 'umount':
-		cache = run_cmd_output("conf=$(grep -rl $(grep '" + args.devs[0] + "[	 ]' /etc/fstab|awk '{print $1;}') /proc/enhanceio/*/config); eio=${conf%/*}; cache=${eio##*/}; echo -n $cache")
+		cache = run_cmd_output("conf=$(realpath $(grep -rl $(grep '^[	 ]*[^#].*" + args.devs[0] + "[	 ]' /etc/fstab|awk '{print $1;}')) /proc/enhanceio/*/config); eio=${conf%/*}; cache=${eio##*/}; echo -n $cache")
 		if len(cache) > 0:
 			setdown = ""
 			cachedev = run_cmd_output("echo -n $(grep ^ssd_name /proc/enhanceio/" + cache + "/config | awk '{print $2;}')")
