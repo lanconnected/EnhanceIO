@@ -780,6 +780,7 @@ def main():
 		# setup
 		setup = "";
 		if len(zramsize) > 0:
+			setup += "modprobe zram; \\\n"
 			setup += "eiodev=$(zramctl --find) && \\\n"
 			setup += "{ \\\n  zramctl -s " + zramsize + " " + "${eiodev} && \\\n"
 			cachedev = "${eiodev}"
