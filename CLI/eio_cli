@@ -730,7 +730,7 @@ def main():
 			# parse options
 			opts = args.mountopts.split(',')
 			for opt in opts:
-				vars = opt.split('=');
+				vars = opt.split('=', 1);
 				if len(vars) != 2:
 					if len(fsopts) > 0:
 						fsopts += ","
