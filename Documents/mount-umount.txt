@@ -1,0 +1,11 @@
+
+two examples for mount.eio / umount.eio:
+
+/etc/fstab:
+/dev/disk/by-uuid/7b7e61d9-afec-4ace-b1d2-e0185d8ec537  /local/home     eio     noauto,defaults,helper=eio,eiodev=/dev/disk/by-id/ata-Micron_1100_SATA_256GB_1720171DB8D8-part1,eiopol=lru,eiomode=wb,eioblksz=4096,eioname=home 0 0
+/dev/disk/by-uuid/6f512062-9e7a-4911-ab8f-173d4d5359a0  /z              eio     noauto,defaults,helper=eio,eiozramsize=100000000,eiopol=lru,eiomode=wb,eioblksz=4096,eioname=z 0 0
+
+# mount /local/home
+# mount /z
+# umount /local/home
+# umount /z
