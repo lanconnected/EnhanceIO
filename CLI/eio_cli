@@ -697,7 +697,6 @@ def main():
 		if len(cache) > 0:
 			setdown = ""
 			cachedev = run_cmd_output("echo -n $(grep ^ssd_name /proc/enhanceio/" + cache + "/config | awk '{print $2;}')")
-			print "cachedev=", cachedev[0:9], "x"
 			if cachedev[0:9] == '/dev/zram':
 				setdown += 'eio_cli delete -c ' + cache + '\n'
 				setdown += 'zramctl -r ' + cachedev + '\n'
