@@ -698,10 +698,10 @@ def main():
 			setdown = ""
 			cachedev = run_cmd_output("echo -n $(grep ^ssd_name /proc/enhanceio/" + cache + "/config | awk '{print $2;}')")
 			if cachedev[0:9] == '/dev/zram':
-				setdown += 'eio_cli delete -c ' + cache + '\n'
-				setdown += 'zramctl -r ' + cachedev + '\n'
+				setdown += '/sbin/eio_cli delete -c ' + cache + '\n'
+				setdown += '/sbin/zramctl -r ' + cachedev + '\n'
 			else:
-				setdown += 'eio_cli disable -c ' + cache + '\n'
+				setdown += '/sbin/eio_cli disable -c ' + cache + '\n'
 			setdown += 'umount -i ' + args.devs[0] + '\n'
 			print >> sys.stderr, sys.argv[0] + ':\n--------\n' + setdown + '--------'
 			return run_cmd_ret(setdown)
@@ -781,11 +781,11 @@ def main():
 		setup = "";
 		if len(zramsize) > 0:
 			setup += "modprobe zram; \\\n"
-			setup += "eiodev=$(zramctl --find) && \\\n"
-			setup += "{ \\\n  zramctl -s " + zramsize + " " + "${eiodev} && \\\n"
+			setup += "eiodev=$(/sbin/zramctl --find) && \\\n"
+			setup += "{ \\\n  /sbin/zramctl -s " + zramsize + " " + "${eiodev} && \\\n"
 			cachedev = "${eiodev}"
 			setup += '  { \\\n'
-		setup += '    eio_cli create -d ' + dev + ' -s ' + cachedev + ' -p ' + policy + ' -m ' + mode + ' -b ' + blocksize + ' -c ' + cache + ' && \\\n'
+		setup += '    /sbin/eio_cli create -d ' + dev + ' -s ' + cachedev + ' -p ' + policy + ' -m ' + mode + ' -b ' + blocksize + ' -c ' + cache + ' && \\\n'
 		if len(fsopts) == 0:
 			fsopts = "default"
 		if len(fstype) == 0:
@@ -793,13 +793,13 @@ def main():
 			fstype = "auto"
 		setup += '    { mount -t ' + fstype + ' -o ' + fsopts + ' ' + dev + ' ' + mnt + ' || \\\n'
 		setup += '      { \\\n'
-		setup += '        eio_cli delete -c ' + cache + '; \\\n'
+		setup += '        /sbin/eio_cli delete -c ' + cache + '; \\\n'
 		if len(zramsize) > 0:
-			setup += '        zramctl --reset ${eiodev}; false; \\\n'
+			setup += '        /sbin/zramctl --reset ${eiodev}; false; \\\n'
 		setup += '        false; \\\n'
 		setup += '      } \\\n'
 		if len(zramsize) > 0:
-			setup += '    } || { zramctl --reset ${eiodev}; false; } \\\n'
+			setup += '    } || { /sbin/zramctl --reset ${eiodev}; false; } \\\n'
 		else:
 			setup += '    }\n'
 		if len(zramsize) > 0:
