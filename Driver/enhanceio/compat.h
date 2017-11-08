@@ -285,13 +285,19 @@ static inline struct block_device *blkdev_get_by_path(const char *path, fmode_t 
 #endif
 
 #ifdef COMPAT_HAVE_BIO_BI_ERROR
+#ifdef  BLK_STS_OK /* kernels > 4.13 */
+#define EIO_ENDIO_FN_START int error __maybe_unused = blk_status_to_errno(bio->bi_status)
+#define EIO_BIO_ENDIO(B,E) do { (B)->bi_status = errno_to_blk_status(E); bio_endio(B); } while (0)
+#else
+#define EIO_ENDIO_FN_START int error __maybe_unused = bio->bi_error
 #define EIO_BIO_ENDIO(B,E) do { (B)->bi_error = E; bio_endio(B); } while (0)
+#endif /* blk_status_to_errno */
 #define eio_endio(B,E) eio_endio(B)
 #define end_unaligned_io(B,E) end_unaligned_io(B)
 #define end_unaligned_free(B,E) end_unaligned_free(B)
 #define eio_split_endio(B,E) eio_split_endio(B)
 #define eio_bio_end_empty_barrier(B,E) eio_bio_end_empty_barrier(B)
-#define EIO_ENDIO_FN_START int error __maybe_unused = bio->bi_error
+
 #else
 #define EIO_BIO_ENDIO(B,E) do { bio_endio(B,E); } while (0)
 #define EIO_ENDIO_FN_START do {} while (0)
