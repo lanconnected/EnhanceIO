@@ -1317,7 +1317,7 @@ int eio_cache_edit(char *cache_name, u_int32_t mode, u_int32_t policy)
 	dmc->cache_flags |= CACHE_FLAGS_MOD_INPROG;
 	spin_unlock_irqrestore(&dmc->cache_spin_lock,
 			       dmc->cache_spin_lock_flags);
-	old_time_thresh = dmc->sysctl_active.time_based_clean_interval;
+	old_time_thresh = dmc->sysctl_active.dirty_max_ttl_sec;
 
 	if (dmc->mode == CACHE_MODE_WB) {
 		if (CACHE_FAILED_IS_SET(dmc)) {
@@ -1386,7 +1386,7 @@ int eio_cache_edit(char *cache_name, u_int32_t mode, u_int32_t policy)
 		}
 	}
 
-	dmc->sysctl_active.time_based_clean_interval = old_time_thresh;
+	dmc->sysctl_active.dirty_max_ttl_sec = old_time_thresh;
 	/* write updated superblock */
 	error = eio_sb_store(dmc);
 	if (error) {
@@ -1402,7 +1402,7 @@ int eio_cache_edit(char *cache_name, u_int32_t mode, u_int32_t policy)
 	up_write(&eio_ttc_lock[index]);
 
 out:
-	dmc->sysctl_active.time_based_clean_interval = old_time_thresh;
+	dmc->sysctl_active.dirty_max_ttl_sec = old_time_thresh;
 
 	/*
 	 * Resetting EIO_CLEAN_START and EIO_CLEAN_KEEP flags.
@@ -1423,14 +1423,15 @@ out:
 				("cache_edit: Failed to restart async tasks. error=%d.\n",
 				ret);
 		}
-		if (dmc->sysctl_active.time_based_clean_interval &&
+		if (dmc->sysctl_active.dirty_max_ttl_sec &&
 		    atomic64_read(&dmc->nr_dirty)) {
 			schedule_delayed_work(&dmc->clean_aged_sets_work,
 					      dmc->
-					      sysctl_active.time_based_clean_interval
-					      * 60 * HZ);
+					      sysctl_active.dirty_max_ttl_sec
+					      * HZ);
 			dmc->is_clean_aged_sets_sched = 1;
 		}
+		schedule_delayed_work(&dmc->calc_disk_load_work, 1);
 	}
 	spin_lock_irqsave(&dmc->cache_spin_lock, dmc->cache_spin_lock_flags);
 	dmc->cache_flags &= ~CACHE_FLAGS_MOD_INPROG;
@@ -1818,9 +1819,9 @@ int eio_reboot_handling(void)
 				continue;
 			}
 			old_time_thresh =
-				dmc->sysctl_active.time_based_clean_interval;
+				dmc->sysctl_active.dirty_max_ttl_sec;
 			eio_stop_async_tasks(dmc);
-			dmc->sysctl_active.time_based_clean_interval =
+			dmc->sysctl_active.dirty_max_ttl_sec =
 				old_time_thresh;
 
 			dmc->cache_rdonly = 1;

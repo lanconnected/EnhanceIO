@@ -696,17 +696,20 @@ int eio_clean_thread_proc(void *context)
 			/* resume the periodic clean */
 			spin_lock_irqsave(&dmc->dirty_set_lru_lock, flags);
 			dmc->is_clean_aged_sets_sched = 0;
-			if (dmc->sysctl_active.time_based_clean_interval
+			/* if there are no dirty blocks (nr_dirty == 0), periodic
+			   clean will not be scheduled here. It will get scheduled
+			   in eio_touch_set_lru once first dirty block is added.
+			 */
+			if (dmc->sysctl_active.dirty_max_ttl_sec
 			    && atomic64_read(&dmc->nr_dirty)) {
 				/* there is a potential race here, If a sysctl changes
-				   the time_based_clean_interval to 0. However a strong
+				   the the dirty_max_ttl_sec to 0. However a strong
 				   synchronisation is not necessary here
 				 */
 				schedule_delayed_work(&dmc->
 						      clean_aged_sets_work,
 						      dmc->sysctl_active.
-						      time_based_clean_interval
-						      * 60 * HZ);
+						      dirty_max_ttl_sec * HZ);
 				dmc->is_clean_aged_sets_sched = 1;
 			}
 			spin_unlock_irqrestore(&dmc->dirty_set_lru_lock, flags);
@@ -1454,49 +1457,52 @@ void eio_md_write(struct kcached_job *job)
 
 	eio_free_cache_job(job);
 }
-
 /* Ensure cache level dirty thresholds compliance. If required, trigger cache-wide clean */
 static void eio_check_dirty_cache_thresholds(struct cache_c *dmc)
 {
-	if (DIRTY_CACHE_THRESHOLD_CROSSED(dmc)) {
-		int64_t required_cleans;
-		int64_t enqueued_cleans;
-		u_int64_t set_time;
-		index_t set_index;
-		unsigned long flags;
+	int64_t required_cleans;
+	int64_t enqueued_cleans;
+	u_int64_t set_time;
+	index_t set_index;
+	unsigned long flags;
 
-		spin_lock_irqsave(&dmc->clean_sl, flags);
-		if (atomic64_read(&dmc->clean_pendings)
-		    || dmc->clean_excess_dirty) {
-			/* Already excess dirty block cleaning is in progress */
-			spin_unlock_irqrestore(&dmc->clean_sl, flags);
-			return;
-		}
-		dmc->clean_excess_dirty = 1;
+	spin_lock_irqsave(&dmc->clean_sl, flags);
+	if (atomic64_read(&dmc->clean_pendings)
+		|| dmc->clean_excess_dirty) {
+		/* Already excess dirty block cleaning is in progress */
 		spin_unlock_irqrestore(&dmc->clean_sl, flags);
-
-		/* Clean needs to be triggered on the cache */
-		required_cleans = atomic64_read(&dmc->nr_dirty) -
-				  (EIO_DIV((dmc->sysctl_active.dirty_low_threshold * dmc->size),
-					   100));
-		enqueued_cleans = 0;
-
-		spin_lock_irqsave(&dmc->dirty_set_lru_lock, flags);
-		do {
-			lru_rem_head(dmc->dirty_set_lru, &set_index, &set_time);
-			if (set_index == LRU_NULL)
-				break;
-
-			enqueued_cleans += dmc->cache_sets[set_index].nr_dirty;
-			spin_unlock_irqrestore(&dmc->dirty_set_lru_lock, flags);
-			eio_addto_cleanq(dmc, set_index, 1);
-			spin_lock_irqsave(&dmc->dirty_set_lru_lock, flags);
-		} while (enqueued_cleans <= required_cleans);
-		spin_unlock_irqrestore(&dmc->dirty_set_lru_lock, flags);
-		spin_lock_irqsave(&dmc->clean_sl, flags);
-		dmc->clean_excess_dirty = 0;
-		spin_unlock_irqrestore(&dmc->clean_sl, flags);
+		return;
 	}
+	dmc->clean_excess_dirty = 1;
+	spin_unlock_irqrestore(&dmc->clean_sl, flags);
+
+	/* Clean needs to be triggered on the cache */
+	if (DIRTY_CACHE_THRESHOLD_CROSSED(dmc)) {
+		required_cleans = atomic64_read(&dmc->nr_dirty) -
+		 (EIO_DIV((dmc->sysctl_active.dirty_low_threshold * dmc->size),
+		  10000));
+	} else
+		required_cleans =
+			min_t(unsigned long, atomic64_read(&dmc->nr_dirty),
+		dmc->sysctl_active.dirty_flush_sched_blocks);
+
+	enqueued_cleans = 0;
+
+	spin_lock_irqsave(&dmc->dirty_set_lru_lock, flags);
+	do {
+		lru_rem_head(dmc->dirty_set_lru, &set_index, &set_time);
+		if (set_index == LRU_NULL)
+			break;
+
+		enqueued_cleans += dmc->cache_sets[set_index].nr_dirty;
+		spin_unlock_irqrestore(&dmc->dirty_set_lru_lock, flags);
+		eio_addto_cleanq(dmc, set_index, 1);
+		spin_lock_irqsave(&dmc->dirty_set_lru_lock, flags);
+	} while (enqueued_cleans <= required_cleans);
+	spin_unlock_irqrestore(&dmc->dirty_set_lru_lock, flags);
+	spin_lock_irqsave(&dmc->clean_sl, flags);
+	dmc->clean_excess_dirty = 0;
+	spin_unlock_irqrestore(&dmc->clean_sl, flags);
 }
 
 /* Ensure set level dirty thresholds compliance. If required, trigger set clean */
@@ -1505,6 +1511,58 @@ static void eio_check_dirty_set_thresholds(struct cache_c *dmc, index_t set)
 	if (DIRTY_SET_THRESHOLD_CROSSED(dmc, set)) {
 		eio_addto_cleanq(dmc, set, 0);
 		return;
+	}
+}
+
+static void eio_calculate_dirty_flush_thresholds(struct cache_c *dmc)
+{
+	if ((atomic64_read(&(dmc)->nr_dirty)) >
+		(int64_t)EIO_DIV(dmc->sysctl_active.dirty_high_threshold *
+		                 dmc->size, 10000)) {
+		dmc->dirty_flush.ios_threshold =
+			dmc->sysctl_active.autoclean_threshold;
+		dmc->dirty_flush.hdd_load_threshold = 10000;
+		dmc->dirty_flush.ssd_load_threshold = 10000;
+	} else if ((atomic64_read(&(dmc)->nr_dirty)) <
+		   (int64_t)EIO_DIV(dmc->sysctl_active.dirty_flush_min_dirty *
+		                    dmc->size, 10000)) {
+		dmc->dirty_flush.ios_threshold =
+			dmc->sysctl_active.dirty_flush_min_ios;
+		dmc->dirty_flush.hdd_load_threshold =
+			dmc->sysctl_active.dirty_flush_hdd_min_load;
+		dmc->dirty_flush.ssd_load_threshold =
+			dmc->sysctl_active.dirty_flush_ssd_min_load;
+	} else {
+		dmc->dirty_flush.ios_threshold =
+			(
+			 (
+			  (
+			   atomic64_read(&(dmc)->nr_dirty) -
+			    EIO_DIV(dmc->sysctl_active.dirty_flush_min_dirty *
+			            dmc->size, 10000)
+			  ) * dmc->dirty_flush.ios_slope
+			 ) >> 24
+			) + dmc->sysctl_active.dirty_flush_min_ios;
+		dmc->dirty_flush.hdd_load_threshold =
+			(
+			 (
+			  (
+			   atomic64_read(&(dmc)->nr_dirty) -
+			    EIO_DIV(dmc->sysctl_active.dirty_flush_min_dirty *
+			            dmc->size, 10000)
+			  ) * dmc->dirty_flush.hdd_load_slope
+			 ) >> 24
+			) + dmc->sysctl_active.dirty_flush_hdd_min_load;
+		dmc->dirty_flush.ssd_load_threshold =
+			(
+			 (
+			  (
+			   atomic64_read(&(dmc)->nr_dirty) -
+			    EIO_DIV(dmc->sysctl_active.dirty_flush_min_dirty *
+			            dmc->size, 10000)
+			  ) * dmc->dirty_flush.ssd_load_slope
+			 ) >> 24
+			) + dmc->sysctl_active.dirty_flush_ssd_min_load;
 	}
 }
 
@@ -1527,13 +1585,16 @@ void eio_comply_dirty_thresholds(struct cache_c *dmc, index_t set)
 			dmc->cache_name);
 		return;
 	}
+	
+	eio_calculate_dirty_flush_thresholds(dmc);
 
 	if (AUTOCLEAN_THRESHOLD_CROSSED(dmc) || (dmc->mode != CACHE_MODE_WB))
 		return;
 
 	if (set != -1)
 		eio_check_dirty_set_thresholds(dmc, set);
-	eio_check_dirty_cache_thresholds(dmc);
+	if (!AUTOCLEAN_AUTO_THRESHOLD_CROSSED(dmc))
+		eio_check_dirty_cache_thresholds(dmc);
 }
 
 /* Do read from cache */
@@ -3007,7 +3068,8 @@ eio_get_setblks_to_clean(struct cache_c *dmc, index_t set, int *ncleans)
 	*ncleans = 0;
 
 	max_clean = dmc->cache_sets[set].nr_dirty -
-		    ((dmc->sysctl_active.dirty_set_low_threshold * dmc->assoc) / 100);
+		    ((dmc->sysctl_active.dirty_set_low_threshold * dmc->assoc) /
+		     10000);
 	if (max_clean <= 0)
 		/* Nothing to clean */
 		return;
@@ -3426,7 +3488,7 @@ void eio_clean_aged_sets(struct work_struct *work)
 
 		/* if the most aged set is younger than clean_interval, break */
 		if ((EIO_DIV((cur_time - set_time), HZ)) <
-		    (dmc->sysctl_active.time_based_clean_interval * 60))
+		    dmc->sysctl_active.dirty_max_ttl_sec)
 			break;
 		lru_rem(dmc->dirty_set_lru, set_index);
 
@@ -3440,12 +3502,11 @@ void eio_clean_aged_sets(struct work_struct *work)
 
 	/* Re-schedule the aged set clean, unless the clean has to stop now */
 
-	if (dmc->sysctl_active.time_based_clean_interval == 0)
+	if (dmc->sysctl_active.dirty_max_ttl_sec == 0)
 		goto out;
 
 	schedule_delayed_work(&dmc->clean_aged_sets_work,
-			      dmc->sysctl_active.time_based_clean_interval *
-			      60 * HZ);
+			      dmc->sysctl_active.dirty_max_ttl_sec * HZ);
 out:
 	return;
 }
@@ -3460,13 +3521,50 @@ void eio_touch_set_lru(struct cache_c *dmc, index_t set)
 	spin_lock_irqsave(&dmc->dirty_set_lru_lock, flags);
 	lru_touch(dmc->dirty_set_lru, set, systime);
 
-	if ((dmc->sysctl_active.time_based_clean_interval > 0) &&
+	if ((dmc->sysctl_active.dirty_max_ttl_sec > 0) &&
 	    (dmc->is_clean_aged_sets_sched == 0)) {
 		schedule_delayed_work(&dmc->clean_aged_sets_work,
 				      dmc->sysctl_active.
-				      time_based_clean_interval * 60 * HZ);
+				      dirty_max_ttl_sec * HZ);
 		dmc->is_clean_aged_sets_sched = 1;
 	}
 
 	spin_unlock_irqrestore(&dmc->dirty_set_lru_lock, flags);
+}
+
+void eio_calc_disk_load(struct work_struct *work)
+{
+	struct cache_c *dmc;
+	u_int64_t timedelta, ssd_ticks, hdd_ticks;
+
+	dmc = container_of(work, struct cache_c, calc_disk_load_work.work);
+	timedelta = jiffies - dmc->disk_load_state.time;
+
+	if (timedelta > 0) {
+		hdd_ticks = part_stat_read(dmc->disk_dev->bdev->bd_part,
+			                   io_ticks);
+		ssd_ticks = part_stat_read(dmc->cache_dev->bdev->bd_part,
+			                   io_ticks);
+		dmc->disk_load_state.time = jiffies;
+		/* integrate a little bit: load = (load_old+load_new)/2 */
+		dmc->disk_load_state.hdd_load =
+			(
+			 dmc->disk_load_state.hdd_load +
+			 EIO_DIV((hdd_ticks - dmc->disk_load_state.hdd_ticks) *
+			         10000, timedelta)
+			) >> 1;
+		dmc->disk_load_state.ssd_load =
+			(
+			 dmc->disk_load_state.ssd_load +
+			 EIO_DIV((ssd_ticks - dmc->disk_load_state.ssd_ticks) *
+			         10000, timedelta)
+			) >> 1;
+		dmc->disk_load_state.ssd_ticks = ssd_ticks;
+		dmc->disk_load_state.hdd_ticks = hdd_ticks;
+	}
+	/* call eio_comply_dirty_thresholds to check whether we can continue
+	 * flushing
+	 */
+	eio_comply_dirty_thresholds(dmc, -1);
+	schedule_delayed_work(&dmc->calc_disk_load_work, msecs_to_jiffies(500));
 }

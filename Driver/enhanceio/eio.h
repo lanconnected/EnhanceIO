@@ -60,8 +60,9 @@
 #include <linux/vmalloc.h>      /* for sysinfo (mem) variables */
 #include <linux/mm.h>
 #include <scsi/scsi_device.h>   /* required for SSD failure handling */
-/* resolve conflict with scsi/scsi_device.h */
+#include <linux/genhd.h>        /* for stat reading */
 #include "compat.h"
+
 #ifdef QUEUED
 #undef QUEUED
 #endif
@@ -122,7 +123,7 @@ EIO_REM(uint64_t dividend_64, uint32_t divisor_32)
 static inline sector_t
 eio_to_sector(uint64_t size_in_bytes)
 {
-	return size_in_bytes >> 9;
+	return size_in_bytes >> SECTOR_SHIFT;
 }
 
 struct eio_control_s {
@@ -268,7 +269,13 @@ union eio_superblock {
 		__le32 dirty_set_low_threshold;
 		__le32 cache_wronly;
 		__le32 time_based_clean_interval;
+		__le32 dirty_max_ttl_sec;
 		__le32 autoclean_threshold;
+		__le32 dirty_flush_min_ios;
+		__le32 dirty_flush_min_dirty;
+		__le32 dirty_flush_hdd_min_load;
+		__le32 dirty_flush_ssd_min_load;
+		__le32 dirty_flush_sched_blocks;
 	} sbf;
 	u_int8_t padding[EIO_SUPERBLOCK_SIZE];
 };
@@ -479,29 +486,32 @@ enum dev_notifier {
 #define CACHE_CREATE            2
 #define CACHE_FORCECREATE       3
 
-/* Sysctl defined */
-#define MAX_CLEAN_IOS_SET       2
-#define MAX_CLEAN_IOS_TOTAL     4
-
 /*
  * TBD
  * Rethink on max, min, default values
  */
-#define DIRTY_HIGH_THRESH_DEF           30
-#define DIRTY_LOW_THRESH_DEF            10
-#define DIRTY_SET_HIGH_THRESH_DEF       100
-#define DIRTY_SET_LOW_THRESH_DEF        30
+#define DIRTY_HIGH_THRESH_DEF          9900
+#define DIRTY_LOW_THRESH_DEF           9500
+#define DIRTY_SET_HIGH_THRESH_DEF      10000
+#define DIRTY_SET_LOW_THRESH_DEF       3000
 
-#define CLEAN_FACTOR(sectors)           ((sectors) >> 25)       /* in 16 GB multiples */
-#define TIME_BASED_CLEAN_INTERVAL_DEF(dmc)      (uint32_t)(CLEAN_FACTOR((dmc)->cache_size) ? \
-							   CLEAN_FACTOR((dmc)->cache_size) : 1)
-#define TIME_BASED_CLEAN_INTERVAL_MAX   720     /* in minutes */
+#define CLEAN_FACTOR(sectors)          ((sectors) >> 19)       /* in 256 MB multiples */
+#define DIRTY_MAX_TTL_SEC_DEF(dmc)     (uint32_t)(CLEAN_FACTOR((dmc)->cache_size) ? \
+                                                   CLEAN_FACTOR((dmc)->cache_size) : 120)
+#define DIRTY_MAX_TTL_SEC_MAX          720*60     /* in seconds */
 
-#define AUTOCLEAN_THRESH_DEF            128     /* Number of I/Os which puts a hold on time based cleaning */
-#define AUTOCLEAN_THRESH_MAX            1024    /* Number of I/Os which puts a hold on time based cleaning */
+#define AUTOCLEAN_THRESH_DEF           128     /* Number of I/Os which puts a hold on time based cleaning */
+#define AUTOCLEAN_THRESH_MAX           1024    /* Number of I/Os which puts a hold on time based cleaning */
+/* disabled by default for now */
+#define DIRTY_FLUSH_MIN_IOS_DEF        0
+#define DIRTY_FLUSH_SSD_MIN_LOAD_DEF   0
+#define DIRTY_FLUSH_HDD_MIN_LOAD_DEF   0
+#define DIRTY_FLUSH_MIN_DIRTY_DEF      10000
+#define DIRTY_FLUSH_SCHED_BLOCKS_DEF   256             /* TBD: Play with me */
+#define DIRTY_FLUSH_SCHED_BLOCKS_MAX   16384
 
 /* Inject a 5s delay between cleaning blocks and metadata */
-#define CLEAN_REMOVE_DELAY      5000
+#define CLEAN_REMOVE_DELAY             5000
 
 /*
  * Subsection 2: Data structures.
@@ -672,12 +682,17 @@ struct eio_sysctl {
 	uint32_t dirty_low_threshold;
 	uint32_t dirty_set_high_threshold;
 	uint32_t dirty_set_low_threshold;
-	uint32_t time_based_clean_interval;    /* time after which dirty sets should clean */
+	uint32_t dirty_max_ttl_sec;    /* time after which dirty sets should clean */
 	int32_t autoclean_threshold;
 	int32_t mem_limit_pct;
 	int32_t control;
 	int32_t cache_wronly;
 	u_int64_t invalidate;
+	int32_t dirty_flush_min_ios;
+	uint32_t dirty_flush_min_dirty;
+	uint32_t dirty_flush_hdd_min_load;
+	uint32_t dirty_flush_ssd_min_load;
+	uint32_t dirty_flush_sched_blocks;
 };
 
 /* forward declaration */
@@ -695,6 +710,25 @@ struct eio_io_region {
 	struct block_device *bdev;
 	sector_t sector;
 	sector_t count;         /* If zero the region is ignored */
+};
+
+/* Store last time and io_ticks for disk load calculation */
+struct disk_load_state {
+	u_int64_t time;
+	u_int64_t ssd_ticks;
+	u_int64_t hdd_ticks;
+	u_int32_t hdd_load;     /* HDD load in hundredth of percent */
+	u_int32_t ssd_load;     /* SSD load in hundredth of percent */
+};
+
+/* Dirty flush settings and thresholds */
+struct dirty_flush {
+	u_int32_t ios_threshold;
+	u_int32_t hdd_load_threshold;
+	u_int32_t ssd_load_threshold;
+	u_int64_t ios_slope;
+	u_int64_t hdd_load_slope;
+	u_int64_t ssd_load_slope;
 };
 
 /*
@@ -792,6 +826,9 @@ struct cache_c {
 	int is_clean_aged_sets_sched;                   /* to know whether clean aged sets is scheduled */
 	struct workqueue_struct *mdupdate_q;            /* Workqueue to handle md updates */
 	struct workqueue_struct *callback_q;            /* Workqueue to handle io callbacks */
+	struct dirty_flush dirty_flush;
+	struct disk_load_state disk_load_state;
+	struct delayed_work calc_disk_load_work;
 };
 
 #define EIO_CACHE_IOSIZE                0
@@ -818,13 +855,21 @@ struct cache_c {
 	((atomic64_read(&(dmc)->nr_ios) > (int64_t)(dmc)->sysctl_active.autoclean_threshold) ||	\
 	 ((dmc)->sysctl_active.autoclean_threshold == 0))
 
+#define AUTOCLEAN_AUTO_THRESHOLD_CROSSED(dmc)  \
+	((atomic64_read(&(dmc)->nr_ios) >= (int64_t)(dmc)->dirty_flush.ios_threshold) || \
+	((dmc)->disk_load_state.hdd_load >= (int64_t)(dmc)->dirty_flush.hdd_load_threshold) || \
+	((dmc)->disk_load_state.ssd_load >= (int64_t)(dmc)->dirty_flush.ssd_load_threshold) || \
+	((dmc)->dirty_flush.ios_threshold == 0) || \
+	((dmc)->dirty_flush.hdd_load_threshold == 0) || \
+	((dmc)->dirty_flush.ssd_load_threshold == 0))
+
 #define DIRTY_CACHE_THRESHOLD_CROSSED(dmc)	\
 	((atomic64_read(&(dmc)->nr_dirty) - atomic64_read(&(dmc)->clean_pendings)) >= \
-	 (int64_t)((dmc)->sysctl_active.dirty_high_threshold * EIO_DIV((dmc)->size, 100)) && \
+	 (int64_t)((dmc)->sysctl_active.dirty_high_threshold * EIO_DIV((dmc)->size, 10000)) && \
 	 ((dmc)->sysctl_active.dirty_high_threshold > (dmc)->sysctl_active.dirty_low_threshold))
 
 #define DIRTY_SET_THRESHOLD_CROSSED(dmc, set)	\
-	(((dmc)->cache_sets[(set)].nr_dirty >= (u_int32_t)((dmc)->sysctl_active.dirty_set_high_threshold * (dmc)->assoc) / 100) && \
+	(((dmc)->cache_sets[(set)].nr_dirty >= (u_int32_t)((dmc)->sysctl_active.dirty_set_high_threshold * (dmc)->assoc) / 10000) && \
 	 ((dmc)->sysctl_active.dirty_set_high_threshold > (dmc)->sysctl_active.dirty_set_low_threshold))
 
 /*
@@ -963,6 +1008,7 @@ void eio_comply_dirty_thresholds(struct cache_c *dmc, index_t set);
 void eio_clean_all(struct cache_c *dmc);
 void eio_clean_for_reboot(struct cache_c *dmc);
 void eio_clean_aged_sets(struct work_struct *work);
+void eio_calc_disk_load(struct work_struct *work);
 void eio_comply_dirty_thresholds(struct cache_c *dmc, index_t set);
 #ifndef SSDCACHE
 void eio_reclaim_lru_movetail(struct cache_c *dmc, index_t index,
@@ -1119,6 +1165,59 @@ EIO_CACHE_STATE_ON(struct cache_c *dmc, index_t index, u_int8_t bitmask)
 
 	cache_state |= bitmask;
 	EIO_CACHE_STATE_SET(dmc, index, cache_state);
+}
+
+static inline void
+EIO_CALCULATE_AUTOCLEAN_SLOPE(struct cache_c *dmc) {
+	if (dmc->sysctl_active.dirty_set_high_threshold <=
+	    dmc->sysctl_active.dirty_flush_min_dirty) {
+		dmc->dirty_flush.ios_slope = 0;
+		dmc->dirty_flush.hdd_load_slope = 0;
+		dmc->dirty_flush.ssd_load_slope = 0;
+	} else {
+		if (dmc->sysctl_active.autoclean_threshold <
+		    dmc->sysctl_active.dirty_flush_min_ios) {
+			dmc->dirty_flush.ios_slope = 0;
+		} else {
+			dmc->dirty_flush.ios_slope =
+			 (
+			  (
+			   (u_int64_t)(
+			    dmc->sysctl_active.autoclean_threshold -
+			    dmc->sysctl_active.dirty_flush_min_ios
+			   ) * 10000
+			  ) << 24
+			 ) /
+			 (u_int64_t)(
+			  dmc->sysctl_active.dirty_high_threshold -
+			  dmc->sysctl_active.dirty_flush_min_dirty
+			 ) / dmc->size;
+		}
+		dmc->dirty_flush.hdd_load_slope =
+		 (
+		  (
+		   (u_int64_t)(
+		     10000 - dmc->sysctl_active.dirty_flush_hdd_min_load
+		    ) * 10000
+		  ) << 24
+		 ) /
+		 (u_int64_t)(
+		  dmc->sysctl_active.dirty_high_threshold -
+		  dmc->sysctl_active.dirty_flush_min_dirty
+		 ) / dmc->size;
+		dmc->dirty_flush.ssd_load_slope =
+		 (
+		  (
+		   (u_int64_t)(
+		    10000 - dmc->sysctl_active.dirty_flush_ssd_min_load
+		   ) * 10000
+		  ) << 24
+		 ) /
+		 (u_int64_t)(
+		  dmc->sysctl_active.dirty_high_threshold -
+		  dmc->sysctl_active.dirty_flush_min_dirty
+		 ) / dmc->size;
+	}
 }
 
 void eio_set_warm_boot(void);

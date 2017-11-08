@@ -305,16 +305,29 @@ int eio_sb_store(struct cache_c *dmc)
 		sb->sbf.cold_boot = cpu_to_le32(le32_to_cpu(sb->sbf.cold_boot) |
 						BOOT_FLAG_FORCE_WARM);
 
-	sb->sbf.dirty_high_threshold = cpu_to_le32(dmc->sysctl_active.dirty_high_threshold);
-	sb->sbf.dirty_low_threshold = cpu_to_le32(dmc->sysctl_active.dirty_low_threshold);
+	sb->sbf.dirty_high_threshold =
+		cpu_to_le32(dmc->sysctl_active.dirty_high_threshold);
+	sb->sbf.dirty_low_threshold =
+		cpu_to_le32(dmc->sysctl_active.dirty_low_threshold);
 	sb->sbf.dirty_set_high_threshold =
 		cpu_to_le32(dmc->sysctl_active.dirty_set_high_threshold);
 	sb->sbf.dirty_set_low_threshold =
 		cpu_to_le32(dmc->sysctl_active.dirty_set_low_threshold);
-	sb->sbf.time_based_clean_interval =
-		cpu_to_le32(dmc->sysctl_active.time_based_clean_interval);
-	sb->sbf.autoclean_threshold = cpu_to_le32(dmc->sysctl_active.autoclean_threshold);
+	sb->sbf.dirty_max_ttl_sec =
+		cpu_to_le32(dmc->sysctl_active.dirty_max_ttl_sec);
+	sb->sbf.autoclean_threshold =
+		cpu_to_le32(dmc->sysctl_active.autoclean_threshold);
 	sb->sbf.cache_wronly = cpu_to_le32(dmc->sysctl_active.cache_wronly);
+	sb->sbf.dirty_flush_min_ios =
+		cpu_to_le32(dmc->sysctl_active.dirty_flush_min_ios);
+	sb->sbf.dirty_flush_ssd_min_load =
+		cpu_to_le32(dmc->sysctl_active.dirty_flush_ssd_min_load);
+	sb->sbf.dirty_flush_hdd_min_load =
+		cpu_to_le32(dmc->sysctl_active.dirty_flush_hdd_min_load);
+	sb->sbf.dirty_flush_min_dirty =
+		cpu_to_le32(dmc->sysctl_active.dirty_flush_min_dirty);
+	sb->sbf.dirty_flush_sched_blocks =
+		cpu_to_le32(dmc->sysctl_active.dirty_flush_sched_blocks);
 
 	/* write out to ssd */
 	where.bdev = dmc->cache_dev->bdev;
@@ -1142,11 +1155,23 @@ static int eio_md_load(struct cache_c *dmc)
 		le32_to_cpu(header->sbf.dirty_set_high_threshold);
 	dmc->sysctl_active.dirty_set_low_threshold =
 		le32_to_cpu(header->sbf.dirty_set_low_threshold);
-	dmc->sysctl_active.cache_wronly = le32_to_cpu(header->sbf.cache_wronly);
-	dmc->sysctl_active.time_based_clean_interval =
-		le32_to_cpu(header->sbf.time_based_clean_interval);
+	dmc->sysctl_active.cache_wronly =
+		le32_to_cpu(header->sbf.cache_wronly);
+	dmc->sysctl_active.dirty_max_ttl_sec =
+		le32_to_cpu(header->sbf.dirty_max_ttl_sec);
 	dmc->sysctl_active.autoclean_threshold =
 		le32_to_cpu(header->sbf.autoclean_threshold);
+	dmc->sysctl_active.dirty_flush_min_ios =
+		le32_to_cpu(header->sbf.dirty_flush_min_ios);
+	dmc->sysctl_active.dirty_flush_hdd_min_load =
+		le32_to_cpu(header->sbf.dirty_flush_hdd_min_load);
+	dmc->sysctl_active.dirty_flush_ssd_min_load =
+		le32_to_cpu(header->sbf.dirty_flush_ssd_min_load);
+	dmc->sysctl_active.dirty_flush_min_dirty =
+		le32_to_cpu(header->sbf.dirty_flush_min_dirty);
+	dmc->sysctl_active.dirty_flush_sched_blocks =
+		le32_to_cpu(header->sbf.dirty_flush_sched_blocks);
+	EIO_CALCULATE_AUTOCLEAN_SLOPE(dmc);
 
 	i = eio_mem_init(dmc);
 	if (i == -1) {
@@ -1752,8 +1777,16 @@ int eio_cache_create(struct cache_rec_short *cache)
 	dmc->sysctl_active.dirty_set_high_threshold = DIRTY_SET_HIGH_THRESH_DEF;
 	dmc->sysctl_active.dirty_set_low_threshold = DIRTY_SET_LOW_THRESH_DEF;
 	dmc->sysctl_active.autoclean_threshold = AUTOCLEAN_THRESH_DEF;
-	dmc->sysctl_active.time_based_clean_interval =
-		TIME_BASED_CLEAN_INTERVAL_DEF(dmc);
+	dmc->sysctl_active.dirty_flush_min_ios = DIRTY_FLUSH_MIN_IOS_DEF;
+	dmc->sysctl_active.dirty_flush_hdd_min_load =
+		DIRTY_FLUSH_HDD_MIN_LOAD_DEF;
+	dmc->sysctl_active.dirty_flush_ssd_min_load =
+		DIRTY_FLUSH_SSD_MIN_LOAD_DEF;
+	dmc->sysctl_active.dirty_flush_min_dirty = DIRTY_FLUSH_MIN_DIRTY_DEF;
+	dmc->sysctl_active.dirty_flush_sched_blocks =
+		DIRTY_FLUSH_SCHED_BLOCKS_DEF;
+	dmc->sysctl_active.dirty_max_ttl_sec = DIRTY_MAX_TTL_SEC_DEF(dmc);
+	EIO_CALCULATE_AUTOCLEAN_SLOPE(dmc);
 
 	if (persistence == CACHE_CREATE) {
 		error = eio_md_create(dmc, /* force */ 0, /* cold */ 1);
@@ -2213,8 +2246,9 @@ void eio_stop_async_tasks(struct cache_c *dmc)
 		 * Prevent new I/Os to schedule the time based cleaning.
 		 * Cancel existing delayed work
 		 */
-		dmc->sysctl_active.time_based_clean_interval = 0;
+		dmc->sysctl_active.dirty_max_ttl_sec = 0;
 		cancel_delayed_work_sync(&dmc->clean_aged_sets_work);
+		cancel_delayed_work_sync(&dmc->calc_disk_load_work);
 	}
 }
 
@@ -2292,11 +2326,13 @@ int eio_allocate_wb_resources(struct cache_c *dmc)
 	 * Reset dmc->is_clean_aged_sets_sched.
 	 * Time based clean will be enabled in eio_touch_set_lru()
 	 * only when dmc->is_clean_aged_sets_sched  is zero and
-	 * dmc->sysctl_active.time_based_clean_interval > 0.
+	 * dmc->sysctl_active.dirty_max_ttl_sec > 0.
 	 */
 
 	dmc->is_clean_aged_sets_sched = 0;
 	INIT_DELAYED_WORK(&dmc->clean_aged_sets_work, eio_clean_aged_sets);
+	INIT_DELAYED_WORK(&dmc->calc_disk_load_work, eio_calc_disk_load);
+	schedule_delayed_work(&dmc->calc_disk_load_work, 1); /* ignore return value */
 	dmc->dirty_set_lru = NULL;
 	ret =
 		lru_init(&dmc->dirty_set_lru,

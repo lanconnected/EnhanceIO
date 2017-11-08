@@ -289,9 +289,9 @@ eio_dirty_high_threshold_sysctl(struct ctl_table *table, int write,
 			return -EINVAL;
 		}
 
-		if (dmc->sysctl_pending.dirty_high_threshold > 100) {
+		if (dmc->sysctl_pending.dirty_high_threshold > 10000) {
 			pr_err
-				("dirty_high_threshold percentage should be [0 - 100]");
+				("dirty_high_threshold percentage should be [0 - 10000");
 			return -EINVAL;
 		}
 
@@ -312,6 +312,7 @@ eio_dirty_high_threshold_sysctl(struct ctl_table *table, int write,
 		old_value = dmc->sysctl_active.dirty_high_threshold;
 		dmc->sysctl_active.dirty_high_threshold =
 			dmc->sysctl_pending.dirty_high_threshold;
+		EIO_CALCULATE_AUTOCLEAN_SLOPE(dmc);
 		spin_unlock_irqrestore(&dmc->cache_spin_lock, flags);
 
 		/* apply the new tunable value */
@@ -326,10 +327,6 @@ eio_dirty_high_threshold_sysctl(struct ctl_table *table, int write,
 
 			return error;
 		}
-
-		/* if we reduced the high threshold, check if we require cache cleaning */
-		if (old_value > dmc->sysctl_active.dirty_high_threshold)
-			eio_comply_dirty_thresholds(dmc, -1);
 	}
 
 	return 0;
@@ -371,9 +368,9 @@ eio_dirty_low_threshold_sysctl(struct ctl_table *table, int write,
 			return -EINVAL;
 		}
 
-		if (dmc->sysctl_pending.dirty_low_threshold > 100) {
+		if (dmc->sysctl_pending.dirty_low_threshold > 10000) {
 			pr_err
-				("dirty_low_threshold percentage should be [0 - 100]");
+				("dirty_low_threshold percentage should be [0 - 10000]");
 			return -EINVAL;
 		}
 
@@ -408,16 +405,6 @@ eio_dirty_low_threshold_sysctl(struct ctl_table *table, int write,
 
 			return error;
 		}
-
-		if (old_value > dmc->sysctl_active.dirty_low_threshold)
-			/*
-			 * Although the low threshold set shouldn't trigger new cleans,
-			 * but because we set the tunables one at a time from user mode,
-			 * it is possible that the high threshold value triggering clean
-			 * did not happen and should get triggered now that the low value
-			 * has been changed, so we are calling the comply function here
-			 */
-			eio_comply_dirty_thresholds(dmc, -1);
 	}
 
 	return 0;
@@ -460,9 +447,9 @@ eio_dirty_set_high_threshold_sysctl(struct ctl_table *table, int write,
 			return -EINVAL;
 		}
 
-		if (dmc->sysctl_pending.dirty_set_high_threshold > 100) {
+		if (dmc->sysctl_pending.dirty_set_high_threshold > 10000) {
 			pr_err
-				("dirty_set_high_threshold percentage should be [0 - 100]");
+				("dirty_set_high_threshold percentage should be [0 - 10000]");
 			return -EINVAL;
 		}
 
@@ -546,9 +533,9 @@ eio_dirty_set_low_threshold_sysctl(struct ctl_table *table, int write,
 			return -EINVAL;
 		}
 
-		if (dmc->sysctl_pending.dirty_set_low_threshold > 100) {
+		if (dmc->sysctl_pending.dirty_set_low_threshold > 10000) {
 			pr_err
-				("dirty_set_low_threshold percentage should be [0 - 100]");
+				("dirty_set_low_threshold percentage should be [0 - 10000]");
 			return -EINVAL;
 		}
 
@@ -719,6 +706,7 @@ eio_autoclean_threshold_sysctl(struct ctl_table *table, int write,
 		old_value = dmc->sysctl_active.autoclean_threshold;
 		dmc->sysctl_active.autoclean_threshold =
 			dmc->sysctl_pending.autoclean_threshold;
+		EIO_CALCULATE_AUTOCLEAN_SLOPE(dmc);
 		spin_unlock_irqrestore(&dmc->cache_spin_lock, flags);
 
 		/* apply the new tunable value */
@@ -733,19 +721,378 @@ eio_autoclean_threshold_sysctl(struct ctl_table *table, int write,
 
 			return error;
 		}
-
-		/* Ensure new thresholds are being complied */
-		eio_comply_dirty_thresholds(dmc, -1);
 	}
 
 	return 0;
 }
 
 /*
- * eio_time_based_clean_interval_sysctl
+ * eio_dirty_flush_min_ios_sysctl
  */
 static int
-eio_time_based_clean_interval_sysctl(struct ctl_table *table, int write,
+eio_dirty_flush_min_ios_sysctl(struct ctl_table *table, int write,
+			       void __user *buffer, size_t *length,
+			       loff_t *ppos)
+{
+	struct cache_c *dmc = (struct cache_c *)table->extra1;
+	unsigned long flags = 0;
+
+	/* fetch the new tunable value or post existing value */
+
+	if (!write) {
+		spin_lock_irqsave(&dmc->cache_spin_lock, flags);
+		dmc->sysctl_pending.dirty_flush_min_ios =
+			dmc->sysctl_active.dirty_flush_min_ios;
+		spin_unlock_irqrestore(&dmc->cache_spin_lock, flags);
+	}
+
+	proc_dointvec(table, write, buffer, length, ppos);
+
+	/* do write processing */
+
+	if (write) {
+		int error;
+		int old_value;
+
+		/* do sanity check */
+
+		if (dmc->mode != CACHE_MODE_WB) {
+			pr_err
+				("dirty_flush_min_ios is valid only for writeback cache");
+			return -EINVAL;
+		}
+
+		if ((dmc->sysctl_pending.dirty_flush_min_ios < 0) ||
+			(dmc->sysctl_pending.dirty_flush_min_ios >
+		     dmc->sysctl_active.autoclean_threshold)) {
+			pr_err("autoclean_threshold is valid range is 0 to %d",
+			       dmc->sysctl_active.autoclean_threshold);
+			return -EINVAL;
+		}
+
+		if (dmc->sysctl_pending.dirty_flush_min_ios ==
+		    dmc->sysctl_active.dirty_flush_min_ios)
+			/* new is same as old value. No need to take any action */
+			return 0;
+
+		/* update the active value with the new tunable value */
+		spin_lock_irqsave(&dmc->cache_spin_lock, flags);
+		old_value = dmc->sysctl_active.dirty_flush_min_ios;
+		dmc->sysctl_active.dirty_flush_min_ios =
+			dmc->sysctl_pending.dirty_flush_min_ios;
+		EIO_CALCULATE_AUTOCLEAN_SLOPE(dmc);
+		spin_unlock_irqrestore(&dmc->cache_spin_lock, flags);
+
+		/* apply the new tunable value */
+
+		/* Store the change persistently */
+		error = eio_sb_store(dmc);
+		if (error) {
+			/* restore back the old value and return error */
+			spin_lock_irqsave(&dmc->cache_spin_lock, flags);
+			dmc->sysctl_active.dirty_flush_min_ios = old_value;
+			spin_unlock_irqrestore(&dmc->cache_spin_lock, flags);
+
+			return error;
+		}
+	}
+
+	return 0;
+}
+
+/*
+ * eio_dirty_flush_hdd_min_load_sysctl
+ */
+static int
+eio_dirty_flush_hdd_min_load_sysctl(struct ctl_table *table, int write,
+			       void __user *buffer, size_t *length,
+			       loff_t *ppos)
+{
+	struct cache_c *dmc = (struct cache_c *)table->extra1;
+	unsigned long flags = 0;
+
+	/* fetch the new tunable value or post existing value */
+
+	if (!write) {
+		spin_lock_irqsave(&dmc->cache_spin_lock, flags);
+		dmc->sysctl_pending.dirty_flush_hdd_min_load =
+			dmc->sysctl_active.dirty_flush_hdd_min_load;
+		spin_unlock_irqrestore(&dmc->cache_spin_lock, flags);
+	}
+
+	proc_dointvec(table, write, buffer, length, ppos);
+
+	/* do write processing */
+
+	if (write) {
+		int error;
+		int old_value;
+
+		/* do sanity check */
+
+		if (dmc->mode != CACHE_MODE_WB) {
+			pr_err
+				("dirty_flush_hdd_min_load is valid only for writeback cache");
+			return -EINVAL;
+		}
+
+		if ((dmc->sysctl_pending.dirty_flush_hdd_min_load < 0) ||
+			(dmc->sysctl_pending.dirty_flush_hdd_min_load > 10000)) {
+			pr_err("autoclean_threshold is valid range is 0 to 10000");
+			return -EINVAL;
+		}
+
+		if (dmc->sysctl_pending.dirty_flush_hdd_min_load ==
+		    dmc->sysctl_active.dirty_flush_hdd_min_load)
+			/* new is same as old value. No need to take any action */
+			return 0;
+
+		/* update the active value with the new tunable value */
+		spin_lock_irqsave(&dmc->cache_spin_lock, flags);
+		old_value = dmc->sysctl_active.dirty_flush_hdd_min_load;
+		dmc->sysctl_active.dirty_flush_hdd_min_load =
+			dmc->sysctl_pending.dirty_flush_hdd_min_load;
+		EIO_CALCULATE_AUTOCLEAN_SLOPE(dmc);
+		spin_unlock_irqrestore(&dmc->cache_spin_lock, flags);
+
+		/* apply the new tunable value */
+
+		/* Store the change persistently */
+		error = eio_sb_store(dmc);
+		if (error) {
+			/* restore back the old value and return error */
+			spin_lock_irqsave(&dmc->cache_spin_lock, flags);
+			dmc->sysctl_active.dirty_flush_hdd_min_load = old_value;
+			spin_unlock_irqrestore(&dmc->cache_spin_lock, flags);
+
+			return error;
+		}
+	}
+
+	return 0;
+}
+
+/*
+ * eio_dirty_flush_ssd_min_load_sysctl
+ */
+static int
+eio_dirty_flush_ssd_min_load_sysctl(struct ctl_table *table, int write,
+			       void __user *buffer, size_t *length,
+			       loff_t *ppos)
+{
+	struct cache_c *dmc = (struct cache_c *)table->extra1;
+	unsigned long flags = 0;
+
+	/* fetch the new tunable value or post existing value */
+
+	if (!write) {
+		spin_lock_irqsave(&dmc->cache_spin_lock, flags);
+		dmc->sysctl_pending.dirty_flush_ssd_min_load =
+			dmc->sysctl_active.dirty_flush_ssd_min_load;
+		spin_unlock_irqrestore(&dmc->cache_spin_lock, flags);
+	}
+
+	proc_dointvec(table, write, buffer, length, ppos);
+
+	/* do write processing */
+
+	if (write) {
+		int error;
+		int old_value;
+
+		/* do sanity check */
+
+		if (dmc->mode != CACHE_MODE_WB) {
+			pr_err
+				("dirty_flush_ssd_min_load is valid only for writeback cache");
+			return -EINVAL;
+		}
+
+		if ((dmc->sysctl_pending.dirty_flush_ssd_min_load < 0) ||
+			(dmc->sysctl_pending.dirty_flush_ssd_min_load > 10000)) {
+			pr_err("autoclean_threshold is valid range is 0 to 10000");
+			return -EINVAL;
+		}
+
+		if (dmc->sysctl_pending.dirty_flush_ssd_min_load ==
+		    dmc->sysctl_active.dirty_flush_ssd_min_load)
+			/* new is same as old value. No need to take any action */
+			return 0;
+
+		/* update the active value with the new tunable value */
+		spin_lock_irqsave(&dmc->cache_spin_lock, flags);
+		old_value = dmc->sysctl_active.dirty_flush_ssd_min_load;
+		dmc->sysctl_active.dirty_flush_ssd_min_load =
+			dmc->sysctl_pending.dirty_flush_ssd_min_load;
+		EIO_CALCULATE_AUTOCLEAN_SLOPE(dmc);
+		spin_unlock_irqrestore(&dmc->cache_spin_lock, flags);
+
+		/* apply the new tunable value */
+
+		/* Store the change persistently */
+		error = eio_sb_store(dmc);
+		if (error) {
+			/* restore back the old value and return error */
+			spin_lock_irqsave(&dmc->cache_spin_lock, flags);
+			dmc->sysctl_active.dirty_flush_ssd_min_load = old_value;
+			spin_unlock_irqrestore(&dmc->cache_spin_lock, flags);
+
+			return error;
+		}
+	}
+
+	return 0;
+}
+
+/*
+ * eio_dirty_flush_min_dirty_sysctl
+ */
+static int
+eio_dirty_flush_min_dirty_sysctl(struct ctl_table *table, int write,
+			       void __user *buffer, size_t *length,
+			       loff_t *ppos)
+{
+	struct cache_c *dmc = (struct cache_c *)table->extra1;
+	unsigned long flags = 0;
+
+	/* fetch the new tunable value or post existing value */
+
+	if (!write) {
+		spin_lock_irqsave(&dmc->cache_spin_lock, flags);
+		dmc->sysctl_pending.dirty_flush_min_dirty =
+			dmc->sysctl_active.dirty_flush_min_dirty;
+		spin_unlock_irqrestore(&dmc->cache_spin_lock, flags);
+	}
+
+	proc_dointvec(table, write, buffer, length, ppos);
+
+	/* do write processing */
+
+	if (write) {
+		int error;
+		int old_value;
+
+		/* do sanity check */
+
+		if (dmc->mode != CACHE_MODE_WB) {
+			pr_err
+				("dirty_flush_min_dirty is valid only for writeback cache");
+			return -EINVAL;
+		}
+
+		if ((dmc->sysctl_pending.dirty_flush_min_dirty < 0)) {
+			pr_err("dirty_flush_min_dirty valid range is 0 to %d",
+			       dmc->sysctl_active.dirty_high_threshold);
+			return -EINVAL;
+		}
+
+		if (dmc->sysctl_pending.dirty_flush_min_dirty ==
+		    dmc->sysctl_active.dirty_flush_min_dirty)
+			/* new is same as old value. No need to take any action */
+			return 0;
+
+		/* update the active value with the new tunable value */
+		spin_lock_irqsave(&dmc->cache_spin_lock, flags);
+		old_value = dmc->sysctl_active.dirty_flush_min_dirty;
+		dmc->sysctl_active.dirty_flush_min_dirty =
+			dmc->sysctl_pending.dirty_flush_min_dirty;
+		EIO_CALCULATE_AUTOCLEAN_SLOPE(dmc);
+		spin_unlock_irqrestore(&dmc->cache_spin_lock, flags);
+
+		/* apply the new tunable value */
+
+		/* Store the change persistently */
+		error = eio_sb_store(dmc);
+		if (error) {
+			/* restore back the old value and return error */
+			spin_lock_irqsave(&dmc->cache_spin_lock, flags);
+			dmc->sysctl_active.dirty_flush_min_dirty = old_value;
+			spin_unlock_irqrestore(&dmc->cache_spin_lock, flags);
+
+			return error;
+		}
+	}
+
+	return 0;
+}
+
+/*
+ * eio_dirty_flush_sched_blocks_sysctl
+ */
+static int
+eio_dirty_flush_sched_blocks_sysctl(struct ctl_table *table, int write,
+			       void __user *buffer, size_t *length,
+			       loff_t *ppos)
+{
+	struct cache_c *dmc = (struct cache_c *)table->extra1;
+	unsigned long flags = 0;
+
+	/* fetch the new tunable value or post existing value */
+
+	if (!write) {
+		spin_lock_irqsave(&dmc->cache_spin_lock, flags);
+		dmc->sysctl_pending.dirty_flush_sched_blocks =
+			dmc->sysctl_active.dirty_flush_sched_blocks;
+		spin_unlock_irqrestore(&dmc->cache_spin_lock, flags);
+	}
+
+	proc_dointvec(table, write, buffer, length, ppos);
+
+	/* do write processing */
+
+	if (write) {
+		int error;
+		int old_value;
+
+		/* do sanity check */
+
+		if (dmc->mode != CACHE_MODE_WB) {
+			pr_err
+				("dirty_flush_sched_blocks is valid only for writeback cache");
+			return -EINVAL;
+		}
+
+		if ((dmc->sysctl_pending.dirty_flush_sched_blocks < 1)) {
+			pr_err("dirty_flush_sched_blocks valid range is 1 to %d",
+			       DIRTY_FLUSH_SCHED_BLOCKS_MAX);
+			return -EINVAL;
+		}
+
+		if (dmc->sysctl_pending.dirty_flush_sched_blocks ==
+		    dmc->sysctl_active.dirty_flush_sched_blocks)
+			/* new is same as old value. No need to take any action */
+			return 0;
+
+		/* update the active value with the new tunable value */
+		spin_lock_irqsave(&dmc->cache_spin_lock, flags);
+		old_value = dmc->sysctl_active.dirty_flush_sched_blocks;
+		dmc->sysctl_active.dirty_flush_sched_blocks =
+			dmc->sysctl_pending.dirty_flush_sched_blocks;
+		EIO_CALCULATE_AUTOCLEAN_SLOPE(dmc);
+		spin_unlock_irqrestore(&dmc->cache_spin_lock, flags);
+
+		/* apply the new tunable value */
+
+		/* Store the change persistently */
+		error = eio_sb_store(dmc);
+		if (error) {
+			/* restore back the old value and return error */
+			spin_lock_irqsave(&dmc->cache_spin_lock, flags);
+			dmc->sysctl_active.dirty_flush_sched_blocks = old_value;
+			spin_unlock_irqrestore(&dmc->cache_spin_lock, flags);
+
+			return error;
+		}
+	}
+
+	return 0;
+}
+
+/*
+ * eio_dirty_max_ttl_sec_sysctl
+ */
+static int
+eio_dirty_max_ttl_sec_sysctl(struct ctl_table *table, int write,
 				     void __user *buffer, size_t *length,
 				     loff_t *ppos)
 {
@@ -756,8 +1103,8 @@ eio_time_based_clean_interval_sysctl(struct ctl_table *table, int write,
 
 	if (!write) {
 		spin_lock_irqsave(&dmc->cache_spin_lock, flags);
-		dmc->sysctl_pending.time_based_clean_interval =
-			dmc->sysctl_active.time_based_clean_interval;
+		dmc->sysctl_pending.dirty_max_ttl_sec =
+			dmc->sysctl_active.dirty_max_ttl_sec;
 		spin_unlock_irqrestore(&dmc->cache_spin_lock, flags);
 	}
 
@@ -773,29 +1120,29 @@ eio_time_based_clean_interval_sysctl(struct ctl_table *table, int write,
 
 		if (dmc->mode != CACHE_MODE_WB) {
 			pr_err
-				("time_based_clean_interval is valid only for writeback cache");
+				("dirty_max_ttl_sec is valid only for writeback cache");
 			return -EINVAL;
 		}
 
-		if (dmc->sysctl_pending.time_based_clean_interval >
-		    TIME_BASED_CLEAN_INTERVAL_MAX) {
-			/* valid values are 0 to TIME_BASED_CLEAN_INTERVAL_MAX */
+		if (dmc->sysctl_pending.dirty_max_ttl_sec >
+		    DIRTY_MAX_TTL_SEC_MAX) {
+			/* valid values are 0 to DIRTY_MAX_TTL_SEC_MAX */
 			pr_err
-				("time_based_clean_interval valid range is 0 to %u",
-				TIME_BASED_CLEAN_INTERVAL_MAX);
+				("dirty_max_ttl_sec valid range is 0 to %u",
+				DIRTY_MAX_TTL_SEC_MAX);
 			return -EINVAL;
 		}
 
-		if (dmc->sysctl_pending.time_based_clean_interval ==
-		    dmc->sysctl_active.time_based_clean_interval)
+		if (dmc->sysctl_pending.dirty_max_ttl_sec ==
+		    dmc->sysctl_active.dirty_max_ttl_sec)
 			/* new is same as old value */
 			return 0;
 
 		/* update the active value with the new tunable value */
 		spin_lock_irqsave(&dmc->cache_spin_lock, flags);
-		old_value = dmc->sysctl_active.time_based_clean_interval;
-		dmc->sysctl_active.time_based_clean_interval =
-			dmc->sysctl_pending.time_based_clean_interval;
+		old_value = dmc->sysctl_active.dirty_max_ttl_sec;
+		dmc->sysctl_active.dirty_max_ttl_sec =
+			dmc->sysctl_pending.dirty_max_ttl_sec;
 		spin_unlock_irqrestore(&dmc->cache_spin_lock, flags);
 
 		/* apply the new tunable value */
@@ -805,7 +1152,7 @@ eio_time_based_clean_interval_sysctl(struct ctl_table *table, int write,
 		if (error) {
 			/* restore back the old value and return error */
 			spin_lock_irqsave(&dmc->cache_spin_lock, flags);
-			dmc->sysctl_active.time_based_clean_interval =
+			dmc->sysctl_active.dirty_max_ttl_sec =
 				old_value;
 			spin_unlock_irqrestore(&dmc->cache_spin_lock, flags);
 
@@ -816,11 +1163,11 @@ eio_time_based_clean_interval_sysctl(struct ctl_table *table, int write,
 		cancel_delayed_work_sync(&dmc->clean_aged_sets_work);
 		spin_lock_irqsave(&dmc->dirty_set_lru_lock, flags);
 		dmc->is_clean_aged_sets_sched = 0;
-		if (dmc->sysctl_active.time_based_clean_interval
+		if (dmc->sysctl_active.dirty_max_ttl_sec
 		    && atomic64_read(&dmc->nr_dirty)) {
 			schedule_delayed_work(&dmc->clean_aged_sets_work,
 					      dmc->sysctl_active.
-					      time_based_clean_interval * 60 *
+					      dirty_max_ttl_sec * 60 *
 					      HZ);
 			dmc->is_clean_aged_sets_sched = 1;
 		}
@@ -1180,7 +1527,7 @@ static struct sysctl_table_common {
 	},
 };
 
-#define NUM_WRITEBACK_SYSCTLS   8
+#define NUM_WRITEBACK_SYSCTLS   13
 
 static struct sysctl_table_writeback {
 	struct ctl_table_header *sysctl_header;
@@ -1202,10 +1549,10 @@ static struct sysctl_table_writeback {
 #if LINUX_VERSION_CODE < KERNEL_VERSION(2,6,33)
 			.ctl_name       = CTL_UNNUMBERED,
 #endif
-			.procname	= "time_based_clean_interval",
+			.procname	= "dirty_max_ttl_sec",
 			.maxlen		= sizeof(unsigned int),
 			.mode		= 0644,
-			.proc_handler	= &eio_time_based_clean_interval_sysctl,
+			.proc_handler	= &eio_dirty_max_ttl_sec_sysctl,
 		}, {            /* 3 */
 #if LINUX_VERSION_CODE < KERNEL_VERSION(2,6,33)
 			.ctl_name       = CTL_UNNUMBERED,
@@ -1259,7 +1606,51 @@ static struct sysctl_table_writeback {
 			.mode		= 0644,
 			.proc_handler	= &eio_cache_wronly_sysctl,
 		}
-		,
+		, {		/* 9 */
+#if LINUX_VERSION_CODE < KERNEL_VERSION(2,6,33)
+			.ctl_name       = CTL_UNNUMBERED,
+#endif
+			.procname	= "dirty_flush_min_ios",
+			.maxlen		= sizeof(int),
+			.mode		= 0644,
+			.proc_handler	= &eio_dirty_flush_min_ios_sysctl,
+		}
+		, {		/* 10 */
+#if LINUX_VERSION_CODE < KERNEL_VERSION(2,6,33)
+			.ctl_name       = CTL_UNNUMBERED,
+#endif
+			.procname	= "dirty_flush_hdd_min_load",
+			.maxlen		= sizeof(int),
+			.mode		= 0644,
+			.proc_handler	= &eio_dirty_flush_hdd_min_load_sysctl,
+		}
+		, {		/* 11 */
+#if LINUX_VERSION_CODE < KERNEL_VERSION(2,6,33)
+			.ctl_name       = CTL_UNNUMBERED,
+#endif
+			.procname	= "dirty_flush_ssd_min_load",
+			.maxlen		= sizeof(int),
+			.mode		= 0644,
+			.proc_handler	= &eio_dirty_flush_ssd_min_load_sysctl,
+		}
+		, {		/* 12 */
+#if LINUX_VERSION_CODE < KERNEL_VERSION(2,6,33)
+			.ctl_name       = CTL_UNNUMBERED,
+#endif
+			.procname	= "dirty_flush_min_dirty",
+			.maxlen		= sizeof(int),
+			.mode		= 0644,
+			.proc_handler	= &eio_dirty_flush_min_dirty_sysctl,
+		}
+		, {		/* 13 */
+#if LINUX_VERSION_CODE < KERNEL_VERSION(2,6,33)
+			.ctl_name       = CTL_UNNUMBERED,
+#endif
+			.procname	= "dirty_flush_sched_blocks",
+			.maxlen		= sizeof(int),
+			.mode		= 0644,
+			.proc_handler	= &eio_dirty_flush_sched_blocks_sysctl,
+		}
 	}
 	, .dev = {
 		{
@@ -1541,8 +1932,8 @@ static void *eio_find_sysctl_data(struct cache_c *dmc, struct ctl_table *vars)
 
 	if (strcmp(vars->procname, "do_clean") == 0)
 		return (void *)&dmc->sysctl_pending.do_clean;
-	if (strcmp(vars->procname, "time_based_clean_interval") == 0)
-		return (void *)&dmc->sysctl_pending.time_based_clean_interval;
+	if (strcmp(vars->procname, "dirty_max_ttl_sec") == 0)
+		return (void *)&dmc->sysctl_pending.dirty_max_ttl_sec;
 	if (strcmp(vars->procname, "dirty_high_threshold") == 0)
 		return (void *)&dmc->sysctl_pending.dirty_high_threshold;
 	if (strcmp(vars->procname, "dirty_low_threshold") == 0)
@@ -1555,6 +1946,16 @@ static void *eio_find_sysctl_data(struct cache_c *dmc, struct ctl_table *vars)
 		return (void *)&dmc->sysctl_pending.cache_wronly;
 	if (strcmp(vars->procname, "autoclean_threshold") == 0)
 		return (void *)&dmc->sysctl_pending.autoclean_threshold;
+	if (strcmp(vars->procname, "dirty_flush_min_ios") == 0)
+		return (void *)&dmc->sysctl_pending.dirty_flush_min_ios;
+	if (strcmp(vars->procname, "dirty_flush_hdd_min_load") == 0)
+		return (void *)&dmc->sysctl_pending.dirty_flush_hdd_min_load;
+	if (strcmp(vars->procname, "dirty_flush_ssd_min_load") == 0)
+		return (void *)&dmc->sysctl_pending.dirty_flush_ssd_min_load;
+	if (strcmp(vars->procname, "dirty_flush_min_dirty") == 0)
+		return (void *)&dmc->sysctl_pending.dirty_flush_min_dirty;
+	if (strcmp(vars->procname, "dirty_flush_sched_blocks") == 0)
+		return (void *)&dmc->sysctl_pending.dirty_flush_sched_blocks;
 	if (strcmp(vars->procname, "zero_stats") == 0)
 		return (void *)&dmc->sysctl_pending.zerostats;
 	if (strcmp(vars->procname, "mem_limit_pct") == 0)
@@ -1892,6 +2293,16 @@ static int eio_stats_show(struct seq_file *seq, void *v)
 	seq_printf(seq, "%-26s %12lld\n", "nr_blocks", dmc->size);
 	seq_printf(seq, "%-26s %12lld\n", "nr_dirty",
 		   (int64_t)atomic64_read(&dmc->nr_dirty));
+	seq_printf(seq, "%-26s %12lld\n", "nr_ios",
+		   (int64_t)atomic64_read(&dmc->nr_ios));
+	seq_printf(seq, "%-26s %12lld\n", "hdd_load", (uint64_t)dmc->disk_load_state.hdd_load);
+	seq_printf(seq, "%-26s %12lld\n", "ssd_load", (uint64_t)dmc->disk_load_state.ssd_load);
+	seq_printf(seq, "%-26s %12u\n", "ios_threshold", (uint32_t)dmc->dirty_flush.ios_threshold);
+	seq_printf(seq, "%-26s %12u\n", "hdd_load_threshold", (uint32_t)dmc->dirty_flush.hdd_load_threshold);
+	seq_printf(seq, "%-26s %12u\n", "ssd_load_threshold", (uint32_t)dmc->dirty_flush.ssd_load_threshold);
+	seq_printf(seq, "%-26s %12lld\n", "ios_slope", (uint64_t)dmc->dirty_flush.ios_slope);
+	seq_printf(seq, "%-26s %12lld\n", "hdd_load_slope", (uint64_t)dmc->dirty_flush.hdd_load_slope);
+	seq_printf(seq, "%-26s %12lld\n", "ssd_load_slope", (uint64_t)dmc->dirty_flush.ssd_load_slope);
 	seq_printf(seq, "%-26s %12u\n", "nr_sets", (uint32_t)dmc->num_sets);
 	seq_printf(seq, "%-26s %12d\n", "clean_index",
 		   (uint32_t)atomic_read(&dmc->clean_index));
