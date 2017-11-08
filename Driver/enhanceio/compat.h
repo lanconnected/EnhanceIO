@@ -285,7 +285,7 @@ static inline struct block_device *blkdev_get_by_path(const char *path, fmode_t 
 #endif
 
 #ifdef COMPAT_HAVE_BIO_BI_ERROR
-#ifdef  BLK_STS_OK /* kernels > 4.13 */
+#ifdef blk_status_to_errno /* kernels > 4.13 */
 #define EIO_ENDIO_FN_START int error __maybe_unused = blk_status_to_errno(bio->bi_status)
 #define EIO_BIO_ENDIO(B,E) do { (B)->bi_status = errno_to_blk_status(E); bio_endio(B); } while (0)
 #else
