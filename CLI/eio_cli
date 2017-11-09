@@ -212,6 +212,33 @@ def run_cmd(cmd):
 	return status
 
 
+def run_cmd_output(cmd):
+	#Utility function that runs a command
+	process = subprocess.Popen(cmd, stdout=subprocess.PIPE,\
+				stderr=subprocess.PIPE,shell=True)
+	ret = process.wait()
+	out = ""
+	err = ""
+	out += process.stdout.read()
+	err += process.stderr.read()
+	if len(err):
+		print err[0:len(err)-1]
+	return out
+
+def run_cmd_ret(cmd):
+	#Utility function that runs a command
+	process = subprocess.Popen(cmd, stdout=subprocess.PIPE,\
+				stderr=subprocess.PIPE,shell=True)
+	ret = process.wait()
+	out = ""
+	err = ""
+	out += process.stdout.read()
+	err += process.stderr.read()
+	if len(out):
+		print out[0:len(out)-1]
+	if len(err):
+		print err[0:len(err)-1]
+	return ret
 
 def get_caches_list():
 	
@@ -551,10 +578,28 @@ def create_parser():
 	parser_disable = parser.add_parser('disable', help='used to disable cache')
 	parser_disable.add_argument("-c", action="store", dest="cache", required=True)
 
+	#mount
+	parser_mount = parser.add_parser('mount', help='eio mounter')
+	parser_mount.add_argument("-o", action="store", dest="mountopts", required=False)
+	parser_mount.add_argument("devs", nargs='*')
+
+	#mount
+	parser_mount = parser.add_parser('umount', help='eio unmounter')
+	parser_mount.add_argument("-o", action="store", dest="mountopts", required=False)
+	parser_mount.add_argument("devs", nargs='*')
+
 	return mainparser
 
 def main():
 	 	
+	basename = os.path.split(sys.argv[0])[1]
+	if basename == 'mount.eio':
+		sys.argv[0] = 'mount'
+		sys.argv.insert(0, 'mount.eio')
+	elif basename == 'umount.eio':
+		sys.argv[0] = 'umount'
+		sys.argv.insert(0, 'umount.eio')
+
 	mainparser = create_parser()
 	args = mainparser.parse_args()
 
@@ -646,6 +691,125 @@ def main():
 		# Performs a basic sanity check
 		sanity(args.hdd, args.ssd)
 		return SUCCESS
+
+	elif sys.argv[1] == 'umount':
+		cache = run_cmd_output("conf=$(realpath $(grep -rl $(grep '^[	 ]*[^#].*" + args.devs[0] + "[	 ]' /etc/fstab|awk '{print $1;}')) /proc/enhanceio/*/config); eio=${conf%/*}; cache=${eio##*/}; echo -n $cache")
+		if len(cache) > 0:
+			setdown = ""
+			cachedev = run_cmd_output("echo -n $(grep ^ssd_name /proc/enhanceio/" + cache + "/config | awk '{print $2;}')")
+			if cachedev[0:9] == '/dev/zram':
+				setdown += '/sbin/eio_cli delete -c ' + cache + '\n'
+				setdown += '/sbin/zramctl -r ' + cachedev + '\n'
+			else:
+				setdown += '/sbin/eio_cli disable -c ' + cache + '\n'
+			setdown += 'umount -i ' + args.devs[0] + '\n'
+			print >> sys.stderr, sys.argv[0] + ':\n--------\n' + setdown + '--------'
+			return run_cmd_ret(setdown)
+		return FAILURE
+
+	elif sys.argv[1] == 'mount':
+		error = ""
+		dev = ""
+		mnt = ""
+		if len(args.devs) != 2:
+			error += '\tneed device and mountpoint (got: ' + ' '.join(args.devs) + ')\n'
+		else:
+			dev = args.devs[0]
+			mnt = args.devs[1]
+		cachedev = ""
+		policy = ""
+		mode = ""
+		blocksize = ""
+		cache = ""
+		fsopts = ""
+		fstype = ""
+		zramsize = ""
+		helper = 0
+		if args.mountopts:
+			# parse options
+			opts = args.mountopts.split(',')
+			for opt in opts:
+				vars = opt.split('=', 1);
+				if len(vars) != 2:
+					if len(fsopts) > 0:
+						fsopts += ","
+					fsopts += opt
+				else:
+					if vars[0] == 'helper' and vars[1] == 'eio':
+						helper = 1
+					if vars[0] == 'eiodev':
+						cachedev = vars[1]
+					elif vars[0] == 'eiopol':
+						policy = vars[1]
+					elif vars[0] == 'eiomode':
+						mode = vars[1]
+					elif vars[0] == 'eioblksz':
+						blocksize = vars[1]
+					elif vars[0] == 'eioname':
+						cache = vars[1]
+					elif vars[0] == 'eiozramsize':
+						zramsize = vars[1]
+					elif vars[0] == 'fstype':
+						fstype = vars[1]
+					else:
+						if len(fsopts) > 0:
+							fsopts += ","
+						fsopts += opt
+		if len(cachedev) == 0 and len(zramsize) == 0:
+			error += '\tmissing eiodev= or eiozramsize=\n'
+		if len(cachedev) > 0 and len(zramsize) > 0:
+			error += '\teiodev= and eiozramsize= are exclusive\n'
+		if len(policy) == 0:
+			error += '\tmissing eiopol= (rand, fifo, lru)\n'
+		if len(mode) == 0:
+			error += '\tmissing eiomode= (wb, wt, ro)\n'
+		if len(blocksize) == 0:
+			error += '\tmissing eioblksz= (2048, 4096, 8192)\n'
+		if len(cache) == 0:
+			error += '\tmissing eioname=\n'
+		if helper == 0:
+			error += '\terror: helper=eio is mandatory in options\n'
+
+		if len(error) > 0:
+			print >> sys.stderr, sys.argv[0] + ': \n' + error
+			sys.exit(1)
+
+		if len(zramsize) > 0 and mode == 'wb':
+			print >> sys.stderr, sys.argv[0] + ': WARNING: write-back mode using zram is DANGEROUS, use an Inverter/UPS with umount feedback!'
+
+		# setup
+		setup = "";
+		if len(zramsize) > 0:
+			setup += "modprobe zram; \\\n"
+			setup += "eiodev=$(/sbin/zramctl --find) && \\\n"
+			setup += "{ \\\n  /sbin/zramctl -s " + zramsize + " " + "${eiodev} && \\\n"
+			cachedev = "${eiodev}"
+			setup += '  { \\\n'
+		setup += '    /sbin/eio_cli create -d ' + dev + ' -s ' + cachedev + ' -p ' + policy + ' -m ' + mode + ' -b ' + blocksize + ' -c ' + cache + ' && \\\n'
+		if len(fsopts) == 0:
+			fsopts = "default"
+		if len(fstype) == 0:
+			print sys.argv[0] + ': using fstype=auto'
+			fstype = "auto"
+		setup += '    { mount -t ' + fstype + ' -o ' + fsopts + ' ' + dev + ' ' + mnt + ' || \\\n'
+		setup += '      { \\\n'
+		setup += '        /sbin/eio_cli delete -c ' + cache + '; \\\n'
+		if len(zramsize) > 0:
+			setup += '        /sbin/zramctl --reset ${eiodev}; false; \\\n'
+		setup += '        false; \\\n'
+		setup += '      } \\\n'
+		if len(zramsize) > 0:
+			setup += '    } || { /sbin/zramctl --reset ${eiodev}; false; } \\\n'
+		else:
+			setup += '    }\n'
+		if len(zramsize) > 0:
+			setup += '  } || false\n'
+			setup += '} || false\n'
+
+		print >> sys.stderr, sys.argv[0] + ':\n--------\n' + setup + '--------'
+
+		return run_cmd_ret(setup)
+
 
 if __name__ == '__main__':
 	sys.exit(main())

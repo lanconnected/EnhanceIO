@@ -10,6 +10,8 @@ Run following commands as root
 1) eio_cli installation
    > cp CLI/eio_cli /sbin/
    > chmod 700 CLI/eio_cli	
+   > ln -s /sbin/eio_cli /sbin/mount.eio
+   > ln -s /sbin/eio_cli /sbin/umount.eio
   
 
 2) Man page
