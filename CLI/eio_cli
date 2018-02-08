@@ -23,6 +23,7 @@ from fcntl import *
 from argparse import ArgumentParser
 import sys,struct
 import subprocess
+import fcntl
 import os
 import re
 
@@ -562,6 +563,9 @@ def main():
 	run_cmd("/sbin/modprobe enhanceio_fifo")
 	run_cmd("/sbin/modprobe enhanceio_lru")
 	run_cmd("/sbin/modprobe enhanceio_rand")
+
+	f = open("/run/eio.lock", "w")
+	fcntl.flock(f, fcntl.LOCK_EX)
 
 	if sys.argv[1] == "create":
 
