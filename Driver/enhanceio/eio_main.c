@@ -369,6 +369,7 @@ static void eio_post_io_callback(struct work_struct *work)
 	unsigned eb_cacheset;
 	u_int8_t cstate;
 	int callendio = 0;
+	struct timeval curtime;
 	int error;
 
 	job = container_of(work, struct kcached_job, work);
@@ -383,11 +384,38 @@ static void eio_post_io_callback(struct work_struct *work)
 	EIO_ASSERT(ebio->eb_bc);
 
 	eb_cacheset = ebio->eb_cacheset;
-	if (error)
-		pr_err("io_callback: io error %d block %llu action %d",
+	if (error) {
+		pr_err("io_callback: io error %d block %llu action %d prev_count %d",
 		       error,
 		       (unsigned long long)job->job_io_regions.disk.sector,
-		       job->action);
+		       job->action, dmc->countErrors[0]);
+		do_gettimeofday(&curtime);
+		if(curtime.tv_sec >= dmc->lasttime.tv_sec + COUNT_SECONDS)  {
+			memset(&dmc->countErrors, 0, sizeof(dmc->countErrors));
+		} else if(curtime.tv_sec > dmc->lasttime.tv_sec)  {
+			int badValues = curtime.tv_sec - dmc->lasttime.tv_sec;
+			memmove(&dmc->countErrors[badValues], &dmc->countErrors[0], sizeof(dmc->countErrors[0]) * (COUNT_SECONDS - badValues));
+			memset(&dmc->countErrors[0], 0, sizeof(dmc->countErrors[0]) * badValues);
+		}
+		dmc->countErrors[0]++;
+		dmc->lasttime = curtime;
+		if(dmc->countErrors[0] > COUNT_MAX_ERRORS) {
+			int have_errors = 1;
+			int iter;
+			for(iter = 0; iter < COUNT_SECONDS; iter++) {
+				if(!dmc->countErrors[iter]) {
+					have_errors = 0;
+					break;
+				}
+			}
+			if(have_errors && !CACHE_DEGRADED_IS_SET(dmc)) {
+				pr_err("io_callback: Too many errors %d - disable SSD drive\n", dmc->countErrors[0]);
+				spin_lock_irqsave(&dmc->cache_spin_lock, dmc->cache_spin_lock_flags);
+				dmc->cache_flags |= CACHE_FLAGS_DEGRADED;
+				spin_unlock_irqrestore(&dmc->cache_spin_lock, dmc->cache_spin_lock_flags);
+			}
+		}
+	}
 
 	switch (job->action) {
 	case WRITEDISK:

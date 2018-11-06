@@ -652,6 +652,8 @@ struct eio_stats {
 #define MIN_JOBS                                1024
 #define MIN_EIO_IO                              4096
 #define MIN_DMC_BIO_PAIR                        8192
+#define COUNT_SECONDS                           2
+#define COUNT_MAX_ERRORS                        30
 
 /* Structure representing a sequence of sets(first to last set index) */
 struct set_seq {
@@ -755,6 +757,8 @@ struct cache_c {
 	int readfill_in_prog;
 	struct eio_stats eio_stats;     /* Run time stats */
 	struct eio_errors eio_errors;   /* Error stats */
+	int countErrors[COUNT_SECONDS]; /* Count errors in last N secconds*/
+	struct timeval lasttime;
 	int clean_inprog;
 	atomic64_t nr_dirty;
 	atomic64_t nr_ios;
