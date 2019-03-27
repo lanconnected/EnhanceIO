@@ -369,7 +369,7 @@ static void eio_post_io_callback(struct work_struct *work)
 	unsigned eb_cacheset;
 	u_int8_t cstate;
 	int callendio = 0;
-	struct timeval curtime;
+	struct timespec64 curtime;
 	int error;
 
 	job = container_of(work, struct kcached_job, work);
@@ -389,7 +389,7 @@ static void eio_post_io_callback(struct work_struct *work)
 		       error,
 		       (unsigned long long)job->job_io_regions.disk.sector,
 		       job->action, dmc->countErrors[0]);
-		do_gettimeofday(&curtime);
+		ktime_get_real_ts64(&curtime);
 		if(curtime.tv_sec >= dmc->lasttime.tv_sec + COUNT_SECONDS)  {
 			memset(&dmc->countErrors, 0, sizeof(dmc->countErrors));
 		} else if(curtime.tv_sec > dmc->lasttime.tv_sec)  {
