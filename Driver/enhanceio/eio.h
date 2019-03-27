@@ -758,7 +758,7 @@ struct cache_c {
 	struct eio_stats eio_stats;     /* Run time stats */
 	struct eio_errors eio_errors;   /* Error stats */
 	int countErrors[COUNT_SECONDS]; /* Count errors in last N secconds*/
-	struct timeval lasttime;
+	struct timespec64 lasttime;
 	int clean_inprog;
 	atomic64_t nr_dirty;
 	atomic64_t nr_ios;
