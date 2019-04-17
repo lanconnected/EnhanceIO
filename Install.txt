@@ -1,29 +1,123 @@
-Installation steps
+Installation
+------------
+
+EnhanceIO requires Linux running kernel 3.7 or higher along with the procfs virtual filesystem
+and udev utilities. The eio_cli utility requires Python2 version 2.6.6 or higher.
+
+Older versions of the Linux kernel or Python may work, but will not be suppoerted.
+
+
+Prerequisit
+-----------
+
+Building kernel modules from source requires that you have kernel development headers installed.
+
+See your distribution's documentation for what packages you need installed for kernel 
+development.
+
+
+Install-EIO
+-----------
+
+For convienience and simplicity, EnhanceIO can now be build and installed using the new
+Install-EIO script. It contains many useful options and saves a lot of time, especialy when
+building for multiple kernels. 
+
+Install Now:
+
+   To build and install EnhanceIO and it's utilities immediately on the current kernel, 
+   simply run:
+   
+   # ./Install-EIO
+   
+   This will build, install, and load the modules required by EnhanceIO, as well as installing
+   eio_cli and it's manual, and even clean up the files leftover by make. Further steps are
+   required.
+
+Install For Another Kernel:
+   
+   To build/install for another kernel runt:
+   
+   # ./Install-EIO -k <KERNEL_VERSION>
+   
+   This will assume that eio_cli has already been installed and will skip its installation.
+   Installing eio_cli separately is covered below.
+   
+   It also assumes that you will not be building for the running kernel and will not load
+   modules for the running kernel.
+   Manualy loading modules is covered below.
+   
+Installing For Multiple Kernels:
+   
+   Install-EIO does not explicitly support building for multiple kernels. However it is
+   theoretically possible to do so using a shell loop.
+   
+   For example:
+   
+   # for i in $(ls /lib/modules); do ./Install-EIO -k $i; done
+   
+   This assumes that the required kernel headers are installed for all present modules.
+   
+Installing eio_cli Separately:
+   
+   Installing eio_cli with Install-EIO is as easy as running:
+   
+   # ./Install-EIO install-cli
+   
+   This will only install eio_cli and it's manual.
+   
+Manual Cleanup:
+   
+   Install-EIO allows you to skip the build cleanup and run it later. To do this just run:
+   
+   # ./Install-EIO cleanup
+   
+   This will only beomve the files created by make after the build process.
+   
+Other Install-EIO Options:
+   
+   For other options suppoted by Install-EIO run:
+   
+   # ./Install-EIO --help
+
+
+Manual Installation
 -------------------
 
-Requirements
-Kernel version 3.7 onwards
-python 2.6.6 onwards
+If you feel the nood to install EnhanceIO manualy, this is still an option.
 
-Run following commands as root
+Make and Make Install:
+   
+   To build and install the EnhanceIO modules run:
+   
+   # cd ./Driver/enhanceio
+   # make && make install
 
-1) eio_cli installation
-   > cp CLI/eio_cli /sbin/
-   > chmod 700 CLI/eio_cli	
-  
+Installing eio_cli:
+   
+   The best way to install the EnhanceIO utility is to use:
+   
+   # install -o root -g root -m 700 ./CLI/eio_cli /sbin/eio_cli
+   
+   The manual can be installed using:
+   
+   # install -o root -g root -m 644 ./CLI/eio_cli.8 /usr/share/man/man8/eio_cli.8
+   
+   This ensures the files areplaces correctly with the correct owner, group, and permissions.
+   
+Loading Modules:
+   
+   Once the modules have been installed on the running kernel they can be loaded using:
+   
+   # modprode enhanceio
+   # modprode enhanceio_rand
+   # modprode enhanceio_fifo
+   # modprode enhanceio_lru
+   
+   Once the modules have been loaded you will be able to use eio_cli to create/modify caches.
+   
+   
+Notes
+-----
 
-2) Man page
-   Copy the  eio_cli.8 file under the man8 subdirectory of man directory (/usr/share/man/man8/).
-
-
-3) Driver installation
-
-   make && make install
-
-4) manually load modules by running
-   modprobe enhanceio_fifo
-   modprobe enhanceio_lru
-   modprobe enhanceio
-   You can now create enhanceio caches using the utility eio_cli. Please refer
-   to Documents/Persistence.txt for information about making a cache
-   configuration persistent across reboot.
+Caches created with eio_cli will be persistent by default. See ./Ducuments/Persistence.txt.
