@@ -31,12 +31,12 @@ Install Now:
    # ./Install-EIO
    
    This will build, install, and load the modules required by EnhanceIO, as well as installing
-   eio_cli and it's manual, and even clean up the files leftover by make. Further steps are
+   eio_cli and it's manual, and even clean up the files leftover by make. No further steps are
    required.
 
 Install For Another Kernel:
    
-   To build/install for another kernel runt:
+   To build/install for another kernel run:
    
    # ./Install-EIO -k <KERNEL_VERSION>
    
@@ -56,7 +56,7 @@ Installing For Multiple Kernels:
    
    # for i in $(ls /lib/modules); do ./Install-EIO -k $i; done
    
-   This assumes that the required kernel headers are installed for all present modules.
+   This assumes that the required kernel headers are installed for all present kernels.
    
 Installing eio_cli Separately:
    
@@ -72,7 +72,7 @@ Manual Cleanup:
    
    # ./Install-EIO cleanup
    
-   This will only beomve the files created by make after the build process.
+   This will only reomve the files created by make after the build process.
    
 Other Install-EIO Options:
    
@@ -84,7 +84,7 @@ Other Install-EIO Options:
 Manual Installation
 -------------------
 
-If you feel the nood to install EnhanceIO manualy, this is still an option.
+If you feel the need to install EnhanceIO manualy, this is still an option.
 
 Make and Make Install:
    
@@ -103,7 +103,7 @@ Installing eio_cli:
    
    # install -o root -g root -m 644 ./CLI/eio_cli.8 /usr/share/man/man8/eio_cli.8
    
-   This ensures the files areplaces correctly with the correct owner, group, and permissions.
+   This ensures the files are placed correctly with the correct owner, group, and permissions.
    
 Loading Modules:
    
