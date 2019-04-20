@@ -1,8 +1,8 @@
 #!/usr/bin/python
 #
-# Copyright (C) 2012 STEC, Inc. All rights not specifically granted
-# under a license included herein are reserved
-# Wrote a python based CLI for admistration of Enhanceio Driver
+# Copyright (c) 2019 EnhanceIO Community Project.
+#
+# Copyright (c) 2012 STEC, Inc.
 # Sanoj Unnikrishnan <sunnikrishnan@stec-inc.com>
 #
 # This program is free software; you can redistribute it and/or modify
@@ -536,9 +536,9 @@ def create_parser():
 	parser_notify.add_argument("-s", action="store", dest="ssd",\
 				   help="name of the ssd device")
 	parser_notify.add_argument("-a", action="store", dest="action",\
-				    help="add/remove/reboot")
-	parser_notify.add_argument("-d", action="store", dest="hdd",\
-				    help="name of the source device")
+				    help="add/remove") #/reboot")
+#	parser_notify.add_argument("-d", action="store", dest="hdd",\
+#				    help="name of the source device")
 	parser_notify.add_argument("-c", action="store", dest="cache", required=True)
 
 	#sanity
@@ -619,30 +619,31 @@ def main():
 
 	elif sys.argv[1] == "notify":
 		# This command will be fired by udev rule on SSD/Source addition
-		if args.action == "reboot":
-			cache = Cache_rec(name = "dummy")
-			cache.do_eio_ioctl(EIO_IOC_ENABLE)
+		#if args.action == "reboot":
+		#	cache = Cache_rec(name = "dummy")
+		#	cache.do_eio_ioctl(EIO_IOC_ENABLE)
 
-		elif args.action == "add": 
+		if args.action == "add": 
 			if args.ssd:
 				cache = Cache_rec(name = args.cache,\
 						ssd_name = args.ssd, persistence = 1)
 				cache.do_eio_ioctl(EIO_IOC_SSD_ADD)
 				
-			elif args.hdd:
-				cache = Cache_rec(name = args.cache,\
-						src_name = args.hdd, persistence = 1)
-				cache.do_eio_ioctl(EIO_IOC_SRC_ADD)
+			#elif args.hdd:
+			#	cache = Cache_rec(name = args.cache,\
+			#			src_name = args.hdd, persistence = 1)
+			#	cache.do_eio_ioctl(EIO_IOC_SRC_ADD)
 
 		elif args.action == "remove":
 			if args.ssd:
 				cache = Cache_rec(name = args.cache, ssd_name = args.ssd,\
 						persistence = 1)
 				cache.do_eio_ioctl(EIO_IOC_SSD_REMOVE)
-			elif args.hdd:
-				cache = Cache_rec(name = args.cache, src_name = args.hdd,\
-						persistence = 1)
-				cache.do_eio_ioctl(EIO_IOC_SRC_REMOVE)
+			
+			#elif args.hdd:
+			#	cache = Cache_rec(name = args.cache, src_name = args.hdd,\
+			#			persistence = 1)
+			#	cache.do_eio_ioctl(EIO_IOC_SRC_REMOVE)
 
 		pass
 
