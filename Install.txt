@@ -4,7 +4,7 @@ Installation
 EnhanceIO requires Linux running kernel 3.7 or higher along with the procfs virtual filesystem
 and udev utilities. The eio_cli utility requires Python2 version 2.6.6 or higher.
 
-Older versions of the Linux kernel or Python may work, but will not be suppoerted.
+Older versions of the Linux kernel or Python may work, but will not be supported.
 
 
 Prerequisit
@@ -19,7 +19,7 @@ development.
 Install-EIO
 -----------
 
-For convienience and simplicity, EnhanceIO can now be build and installed using the new
+For convienience and simplicity, EnhanceIO can now be built and installed using the new
 Install-EIO script. It contains many useful options and saves a lot of time, especialy when
 building for multiple kernels. 
 
@@ -72,7 +72,7 @@ Manual Cleanup:
    
    # ./Install-EIO cleanup
    
-   This will only reomve the files created by make after the build process.
+   This will only remove the files created by make after the build process.
    
 Other Install-EIO Options:
    
@@ -121,3 +121,15 @@ Notes
 -----
 
 Caches created with eio_cli will be persistent by default. See ./Ducuments/Persistence.txt.
+
+
+Licence
+-------
+
+Copyrioght (c) 2019 EnhanceIO Community Project.
+
+This document is distributed as source, along with EnhanceIO, under the GNU General Public 
+Licence. You are free to modify/redistibute this document under the terms of the GPL.
+
+You should have received a copy of the GNU General Public License along with this program.  
+If not, see <http://www.gnu.org/licenses/>.
