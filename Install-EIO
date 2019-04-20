@@ -1,8 +1,19 @@
 #!/bin/bash
 # A script to simplify the instalation of EnhanceIO.
 #
-# Courtesy of T. "Luna" Ericson aka. CPT Gray Wolf and FSG,
-# and distributed under the GPL along with EnhanceIO.
+# Copyright (c) 2019 EnhanceIO Community Project.
+# Courtesy of T. "Luna" Ericson aka. CPT Gray Wolf and FSG, and 
+# distributed under the GPL along with EnhanceIO.
+#
+# You are free and ENCOURAGED to modify and redistribute this program
+# under the terms of the GNU General Public Licence.
+#
+# This program is distributed in the hope that it will be useful, but
+# WITHOUT ANY WARRANTY. See the GNU General Public License for more 
+# details.
+#
+# You should have received a copy of the GNU General Public License
+# along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
 # Get the script command security prefix to esure no malicious
 # scripts are executed by mistake.
@@ -16,20 +27,24 @@ else
 fi
 
 
-# Ensure that we're running as root.
-if [ $(${BPREFIX}id -u) -ne 0 ]
-    then
-    ${BPREFIX}echo "INSTALL-EIO: You need to be root to do that" >&2
-    exit 1
-fi
-
-
 # This is where any important preset variables will go.
 PYTHON_VERSION=$(${BPREFIX}python -c 'import platform; python_version=platform.python_version(); print (python_version)')
 SOURCE_DIR='./Driver/enhanceio/'
 KERNEL_VERSION=''
 PY_VERSION_CHECK=1; MAKE_MODS=1; INSTALL_MODS=1; CLEANUP=1; INSTALL_CLI=1; LOAD_MODS=1
 
+
+
+# Ensure that we're running as root.
+_CheckRoot ()
+{
+    if [ $(${BPREFIX}id -u) -ne 0 ]
+        then
+        ${BPREFIX}echo "INSTALL-EIO: You need to be root to do that" >&2
+        exit 1
+    fi
+    return
+}
 
 
 # Use a complicated regex to check the installed python version.
@@ -134,11 +149,14 @@ if [ $# -eq 1 ]
     then
     case "$1" in
         cleanup)
-        _RunCleanup
+        _CheckRoot
         ${BPREFIX}echo "INSTALL-EIO: Cleaning up leftover build files"
+        _RunCleanup
         exit 0
         ;;
         install-cli)
+        _CheckRoot
+        ${BPREFIX}echo "INSTALL-EIO: Installing eio_cli..."
         _CheckPythonVersion &&
         _InstallCLI &&
         exit 0
@@ -199,6 +217,7 @@ done
 
 if [ $MAKE_MODS -eq 1 ]
     then
+    _CheckRoot
     ${BPREFIX}echo "INSTALL-EIO: Building kernel modules"
     _RunMake $KERNEL_VERSION
     if [ $? -eq 1 ]
@@ -210,6 +229,7 @@ if [ $MAKE_MODS -eq 1 ]
 fi
 if [ $INSTALL_MODS -eq 1 ]
     then
+    _CheckRoot
     ${BPREFIX}echo "INSTALL-EIO: Installing modules"
     _RunInstall $KERNEL_VERSION
     if [ $? -eq 1 ]
@@ -233,6 +253,7 @@ if [ $PY_VERSION_CHECK -eq 1 ]
 fi
 if [ $INSTALL_CLI -eq 1 ]
     then
+    _CheckRoot
     ${BPREFIX}echo "INSTALL-EIO: Installing eio_cli"
     _InstallCLI
     if [ $? -eq 1 ]
@@ -248,6 +269,7 @@ if [ $INSTALL_CLI -eq 1 ]
 fi
 if [ $LOAD_MODS -eq 1 ]
     then
+    _CheckRoot
     ${BPREFIX}echo "INSTALL-EIO: Loading EnhanceIO modules"
     _LoadMods
     if [ $? -eq 1 ]
@@ -259,6 +281,7 @@ if [ $LOAD_MODS -eq 1 ]
 fi
 if [ $CLEANUP -eq 1 ]
     then
+    _CheckRoot
     ${BPREFIX}echo "INSTALL-EIO: Cleaning up build files..."
     _RunCleanup
 fi
